@@ -36,11 +36,13 @@ Android 上现成的 rootfs 包通常有三个毛病：
 
 | 档位 | 体积（arm64，约） | 里面有什么 |
 |---|---|---|
-| `min` | 15~25 MB | bash + apt/apk + ca-certificates + tzdata。能装包，别的什么都没有 |
-| `base` | 45~75 MB | 加 curl / wget / git / less / vim-tiny / jq / unzip / zip / xz / procps / openssh-client / gnupg / htop / tree / bash-completion |
-| `dev` | 180~260 MB | 加 build-essential / gcc / make / python3 / pip / venv / cmake / sqlite3 / 常用 `-dev` 头文件 |
+| `min` | 4~45 MB | bash + apt/apk + ca-certificates + tzdata。能装包，别的什么都没有 |
+| `base` | 55~75 MB | 加 curl / wget / git / less / vim-tiny / jq / unzip / zip / xz / procps / openssh-client / gnupg / htop / tree / bash-completion |
+| `dev` | 170~220 MB | 加 build-essential / gcc / make / python3 / pip / venv / cmake / sqlite3 / 常用 `-dev` 头文件 |
 
-`min ⊂ base ⊂ dev`，后一档包含前一档。实际体积在每次发布后见 [`docs/包清单.md`](docs/包清单.md)。
+`min ⊂ base ⊂ dev`，后一档包含前一档。
+
+当前实测（arm64）：Alpine 3.22 `min` **4.1 MB**、Ubuntu 24.04 `base` **59 MB**、Debian 12 `base` **70 MB**。完整清单见 [`docs/包清单.md`](docs/包清单.md)。
 
 ## 下载
 

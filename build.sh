@@ -214,13 +214,28 @@ pack() { # $1=root $2=输出 $3=epoch
 verify() { # $1=产物
   local f="$1"
   gzip -t "$f" 2>/dev/null || die "gzip 校验失败，包被截断：$f"
+
   local list; list="$(tar -tzf "$f")"
-  printf '%s\n' "$list" | grep -qx './bin/sh' \
-    || die "缺少 ./bin/sh —— 应用会认为这不是可用 rootfs"
-  if tar -tvzf "$f" | awk '$NF=="etc/resolv.conf"||$NF=="./etc/resolv.conf"{print $1}' | grep -q '^l'; then
-    die "/etc/resolv.conf 是软链，proot 里会 DNS 全挂"
+  local tf; tf="$(mktemp)"
+  printf '%s\n' "$list" > "$tf"
+
+  # 不能写 tar | grep -q：set -o pipefail 下 grep 提前退出会让上游吃 SIGPIPE(141)，
+  # 明明匹配上了也会被当成失败。先落盘再 grep 最稳。
+  if ! grep -qE '(^|/)bin/sh$' "$tf"; then
+    printf '%s\n' '--- 包里前 10 条 ---' >&2
+    head -10 "$tf" >&2
+    printf '%s\n' '--- 含 bin/sh 的条目 ---' >&2
+    grep -E 'bin/sh$' "$tf" | head -10 >&2 || true
+    rm -f "$tf"
+    die "缺少 bin/sh —— 应用会认为这不是可用 rootfs"
   fi
-  ok "自检通过：$(printf '%s\n' "$list" | wc -l) 个条目，$(du -h "$f" | cut -f1)"
+
+  local modes; modes="$(tar -tvzf "$f" | awk '$NF=="etc/resolv.conf"||$NF=="./etc/resolv.conf"{print $1}')"
+  case "$modes" in l*) rm -f "$tf"; die "/etc/resolv.conf 是软链，proot 里会 DNS 全挂" ;; esac
+
+  local n; n="$(wc -l < "$tf")"
+  rm -f "$tf"
+  ok "自检通过：$n 个条目，$(du -h "$f" | cut -f1)"
 }
 
 # ---------------------------------------------------------------- Alpine
@@ -331,7 +346,15 @@ build_one() { # $1=distro $2=arch $3=tier
   VER="${D_VERSION[$DISTRO]}"; RELEASE="${D_RELEASE[$DISTRO]}"
   FAMILY="${D_FAMILY[$DISTRO]}"; COMPONENTS="${D_COMPONENTS[$DISTRO]:-}"
   KEYRING="${D_KEYRING[$DISTRO]:-}"
-  [ -n "$MIRROR_ARG" ] && MIRROR="$MIRROR_ARG" || MIRROR="${D_MIRROR[$DISTRO]}"
+  if [ -n "$MIRROR_ARG" ]; then MIRROR="$MIRROR_ARG"; else MIRROR="${D_MIRROR[$DISTRO]}"; fi
+  # Ubuntu 的 arm64 包在 ubuntu-ports，不在主归档；按架构自动挑对
+  if [ "$ARCH" != amd64 ] && [ "${D_NAME[$DISTRO]}" = "Ubuntu" ]; then
+    case "$MIRROR" in
+      *ports.ubuntu.com*|*ubuntu-ports*) : ;;
+      *archive.ubuntu.com*) MIRROR="http://ports.ubuntu.com/ubuntu-ports"; warn "arm64 改用 $MIRROR" ;;
+      */ubuntu) MIRROR="${MIRROR}-ports"; warn "arm64 改用 $MIRROR" ;;
+    esac
+  fi
 
   [ "$(id -u)" -eq 0 ] || die "需要 root：sudo ./build.sh ..."
 
@@ -367,6 +390,10 @@ build_one() { # $1=distro $2=arch $3=tier
   pack "$root" "$out" "$epoch"
   ( cd "$PWD/out" && sha256sum "$name" > "$name.sha256" )
   verify "$out"
+  # sudo 构建出来的文件归 root，普通用户跑 make-index.py 时会 Permission denied
+  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+    chown "$SUDO_USER": "$out" "$out.sha256" "$PWD/out" 2>/dev/null || true
+  fi
 
   [ "${KEEP:-0}" -eq 1 ] || rm -rf "$WORK"
   echo; ok "产物 out/$name（$(du -h "$out" | cut -f1)）"
