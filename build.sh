@@ -4,45 +4,84 @@
 #
 #   sudo ./build.sh <发行版> <架构> <档位>
 #
-#   发行版：debian-12 | debian-13 | ubuntu-24.04 | ubuntu-26.04 | alpine-3.24
-#   架构  ：arm64 | amd64
+#   发行版：
+#     debian-12 | debian-13 | ubuntu-24.04 | ubuntu-26.04 | alpine-3.24
+#     almalinux-9 | opensuse-tumbleweed | opencloudos-9 | archlinux | kalinethunter | void
+#   架构  ：arm64 | amd64        （archlinux 只有 arm64）
 #   档位  ：min | base | dev
 #
 #   例：sudo ./build.sh debian-12 arm64 base
+#       sudo ./build.sh almalinux-9 arm64 base
+#       sudo ./build.sh void amd64 dev
 #       sudo ./build.sh ubuntu-24.04 amd64 base --mirror http://mirrors.tuna.tsinghua.edu.cn/ubuntu
 #
 #   全部跑一遍：sudo ./build.sh all          （见文件末尾的矩阵定义）
+#   只跑新增的几个：sudo ./build.sh new-all
 #
 set -euo pipefail
 
 # ---------------------------------------------------------------- 发行版定义
-# MIRROR 可被 --mirror 覆盖；国内建议清华/中科大，构建快 5~10 倍
-declare -A D_NAME D_VERSION D_RELEASE D_FAMILY D_MIRROR D_COMPONENTS D_KEYRING
+# FAMILY = 怎么把根文件系统弄出来：deb | alpine | lxc | tarball | dockersave
+# PM     = 装包用哪个包管理器：apt | apk | dnf | zypper | pacman | xbps
+declare -A D_NAME D_VERSION D_RELEASE D_FAMILY D_MIRROR D_COMPONENTS D_KEYRING D_PM D_ARCHES
+# LXC 源（images.linuxcontainers.org）
+declare -A D_LXC_PROJECT D_LXC_VERSION
 
 DISTROS=(debian-12 debian-13 ubuntu-24.04 ubuntu-26.04 alpine-3.24)
+NEW_DISTROS=(almalinux-9 opensuse-tumbleweed opencloudos-9 archlinux kalinethunter void)
 
 D_NAME[debian-12]="Debian";        D_VERSION[debian-12]="12";    D_RELEASE[debian-12]=bookworm
-D_FAMILY[debian-12]=deb;           D_MIRROR[debian-12]="http://deb.debian.org/debian"
+D_FAMILY[debian-12]=deb;           D_PM[debian-12]=apt
+D_MIRROR[debian-12]="http://deb.debian.org/debian"
 D_COMPONENTS[debian-12]="main,contrib,non-free,non-free-firmware"
 D_KEYRING[debian-12]="/usr/share/keyrings/debian-archive-keyring.gpg"
 
 D_NAME[debian-13]="Debian";        D_VERSION[debian-13]="13";    D_RELEASE[debian-13]=trixie
-D_FAMILY[debian-13]=deb;           D_MIRROR[debian-13]="http://deb.debian.org/debian"
+D_FAMILY[debian-13]=deb;           D_PM[debian-13]=apt
+D_MIRROR[debian-13]="http://deb.debian.org/debian"
 D_COMPONENTS[debian-13]="main,contrib,non-free,non-free-firmware"
 D_KEYRING[debian-13]="/usr/share/keyrings/debian-archive-keyring.gpg"
 
 D_NAME[ubuntu-24.04]="Ubuntu";     D_VERSION[ubuntu-24.04]="24.04"; D_RELEASE[ubuntu-24.04]=noble
-D_FAMILY[ubuntu-24.04]=deb;        D_MIRROR[ubuntu-24.04]="http://archive.ubuntu.com/ubuntu"
+D_FAMILY[ubuntu-24.04]=deb;        D_PM[ubuntu-24.04]=apt
+D_MIRROR[ubuntu-24.04]="http://archive.ubuntu.com/ubuntu"
 D_COMPONENTS[ubuntu-24.04]="main,restricted,universe,multiverse"
 D_KEYRING[ubuntu-24.04]="/usr/share/keyrings/ubuntu-archive-keyring.gpg"
 
 D_NAME[ubuntu-26.04]="Ubuntu";     D_VERSION[ubuntu-26.04]="26.04"; D_RELEASE[ubuntu-26.04]=resolute
-D_FAMILY[ubuntu-26.04]=deb;        D_MIRROR[ubuntu-26.04]="http://archive.ubuntu.com/ubuntu"
+D_FAMILY[ubuntu-26.04]=deb;        D_PM[ubuntu-26.04]=apt
+D_MIRROR[ubuntu-26.04]="http://archive.ubuntu.com/ubuntu"
 D_COMPONENTS[ubuntu-26.04]="main,restricted,universe,multiverse"
 D_KEYRING[ubuntu-26.04]="/usr/share/keyrings/ubuntu-archive-keyring.gpg"
 
 D_NAME[alpine-3.24]="Alpine";      D_VERSION[alpine-3.24]="3.24";  D_RELEASE[alpine-3.24]=v3.24
-D_FAMILY[alpine-3.24]=alpine;      D_MIRROR[alpine-3.24]="https://dl-cdn.alpinelinux.org/alpine"
+D_FAMILY[alpine-3.24]=alpine;      D_PM[alpine-3.24]=apk
+D_MIRROR[alpine-3.24]="https://dl-cdn.alpinelinux.org/alpine"
+
+# ---- 以下为 2026-11 新增的六个 ----
+# AlmaLinux / openSUSE：从 LXC 官方镜像服务器拿现成的 rootfs.tar.xz（arm64 + amd64 都有）
+D_NAME[almalinux-9]="AlmaLinux";            D_VERSION[almalinux-9]="9"
+D_FAMILY[almalinux-9]=lxc;                  D_PM[almalinux-9]=dnf
+D_LXC_PROJECT[almalinux-9]=almalinux;       D_LXC_VERSION[almalinux-9]=9
+
+D_NAME[opensuse-tumbleweed]="openSUSE";     D_VERSION[opensuse-tumbleweed]="tumbleweed"
+D_FAMILY[opensuse-tumbleweed]=lxc;          D_PM[opensuse-tumbleweed]=zypper
+D_LXC_PROJECT[opensuse-tumbleweed]=opensuse; D_LXC_VERSION[opensuse-tumbleweed]=tumbleweed
+
+# OpenCloudOS：官方只给 docker save 包，展开它的 layer.tar 才是 rootfs
+D_NAME[opencloudos-9]="OpenCloudOS";        D_VERSION[opencloudos-9]="9"
+D_FAMILY[opencloudos-9]=dockersave;         D_PM[opencloudos-9]=dnf
+
+# Arch / Kali / Void：官方直接给 rootfs 压缩包，下下来解压即可
+D_NAME[archlinux]="Arch Linux";             D_VERSION[archlinux]="aarch64"
+D_FAMILY[archlinux]=tarball;                D_PM[archlinux]=pacman
+D_ARCHES[archlinux]="arm64"                 # ArchLinuxARM 只有 aarch64；x86 版是 .tar.zst，应用不支持
+
+D_NAME[kalinethunter]="Kali NetHunter";     D_VERSION[kalinethunter]="current"
+D_FAMILY[kalinethunter]=tarball;            D_PM[kalinethunter]=apt
+
+D_NAME[void]="Void Linux";                  D_VERSION[void]="current"
+D_FAMILY[void]=tarball;                     D_PM[void]=xbps
 
 # ---------------------------------------------------------------- 档位包清单
 # min ⊂ base ⊂ dev（后面的档位会把前面的一起装上）
@@ -54,17 +93,46 @@ PKG_ALPINE_MIN="ca-certificates tzdata"
 PKG_ALPINE_BASE="bash curl wget git less vim nano file jq tree htop unzip zip xz procps psmisc iproute2 net-tools openssh-client gnupg bash-completion"
 PKG_ALPINE_DEV="build-base python3 py3-pip py3-virtualenv python3-dev openssl-dev zlib-dev libffi-dev cmake sqlite"
 
-pkgs_for() { # $1=family $2=tier
-  local fam="$1" tier="$2" out=""
-  if [ "$fam" = deb ]; then
-    out="$PKG_DEB_MIN"
-    if [ "$tier" = base ] || [ "$tier" = dev ]; then out="$out $PKG_DEB_BASE"; fi
-    if [ "$tier" = dev ]; then out="$out $PKG_DEB_DEV"; fi
-  else
-    out="$PKG_ALPINE_MIN"
-    if [ "$tier" = base ] || [ "$tier" = dev ]; then out="$out $PKG_ALPINE_BASE"; fi
-    if [ "$tier" = dev ]; then out="$out $PKG_ALPINE_DEV"; fi
-  fi
+# dnf：AlmaLinux(RHEL 系) / OpenCloudOS
+# 注意 RHEL 系的包名和 Debian 不一样：procps-ng / iproute / openssh-clients / gnupg2
+PKG_DNF_MIN="ca-certificates tzdata"
+PKG_DNF_BASE="curl wget git less vim-minimal file jq tree htop unzip zip xz procps-ng psmisc iproute net-tools openssh-clients gnupg2 bash-completion"
+PKG_DNF_DEV="gcc gcc-c++ make python3 python3-pip python3-devel openssl-devel zlib-devel libffi-devel cmake sqlite"
+
+# zypper：openSUSE 的 openssl-devel 叫 libopenssl-devel，gpg 叫 gpg2，procps 不带 -ng
+PKG_ZYPPER_MIN="ca-certificates tzdata"
+PKG_ZYPPER_BASE="curl wget git less vim file jq tree htop unzip zip xz gzip procps psmisc iproute2 net-tools openssh-clients gpg2 bash-completion"
+PKG_ZYPPER_DEV="gcc gcc-c++ make python3 python3-pip python3-devel libopenssl-devel zlib-devel libffi-devel cmake sqlite3"
+
+# pacman：Arch 基础镜像已经自带 coreutils/file/less/procps-ng/psmisc/iproute2，
+# min 档不装东西（装了也只是把同一批包「重装」一遍，白花时间）
+PKG_PACMAN_MIN=""
+PKG_PACMAN_BASE="curl wget git less file jq tree htop unzip zip xz procps-ng psmisc iproute2 net-tools openssh gnupg bash-completion"
+PKG_PACMAN_DEV="base-devel python python-pip python-virtualenv openssl zlib libffi cmake sqlite"
+
+# xbps：Void 的 openssh 自带 client，base-devel 是元包
+PKG_XBPS_MIN="ca-certificates tzdata"
+PKG_XBPS_BASE="curl wget git less vim file jq tree htop unzip zip xz procps-ng psmisc iproute2 net-tools openssh gnupg bash-completion"
+PKG_XBPS_DEV="base-devel python3 python3-pip python3-virtualenv python3-devel openssl-devel zlib-devel libffi-devel cmake sqlite"
+
+pkgs_for() { # $1=pm $2=tier
+  local pm="$1" tier="$2" min="" base="" dev=""
+  case "$pm" in
+    apt)    min="$PKG_DEB_MIN";    base="$PKG_DEB_BASE";    dev="$PKG_DEB_DEV" ;;
+    apk)    min="$PKG_ALPINE_MIN"; base="$PKG_ALPINE_BASE"; dev="$PKG_ALPINE_DEV" ;;
+    dnf)    min="$PKG_DNF_MIN";    base="$PKG_DNF_BASE";    dev="$PKG_DNF_DEV" ;;
+    zypper) min="$PKG_ZYPPER_MIN"; base="$PKG_ZYPPER_BASE"; dev="$PKG_ZYPPER_DEV" ;;
+    pacman) min="$PKG_PACMAN_MIN"; base="$PKG_PACMAN_BASE"; dev="$PKG_PACMAN_DEV" ;;
+    xbps)   min="$PKG_XBPS_MIN";   base="$PKG_XBPS_BASE";   dev="$PKG_XBPS_DEV" ;;
+    *) die "未知包管理器: $pm" ;;
+  esac
+  local out="$min"
+  case "$tier" in
+    min) : ;;
+    base) out="$out $base" ;;
+    dev)  out="$out $base $dev" ;;
+    *) die "未知档位: $tier" ;;
+  esac
   echo "$out" | tr -s ' ' | sed 's/^ //;s/ $//'
 }
 
@@ -76,6 +144,7 @@ die()  { printf '\033[31merror\033[0m %s\n' "$*" >&2; exit 1; }
 
 host_arch() { case "$(uname -m)" in aarch64|arm64) echo arm64 ;; x86_64|amd64) echo amd64 ;; *) die "构建机架构不支持: $(uname -m)";; esac; }
 arch_apk()  { case "$1" in arm64) echo aarch64 ;; amd64) echo x86_64 ;; esac; }
+arch_lxc()  { case "$1" in arm64) echo arm64 ;; amd64) echo amd64 ;; esac; }
 qemu_bin()  { case "$1" in arm64) echo qemu-aarch64-static ;; amd64) echo qemu-x86_64-static ;; esac; }
 binfmt_magic() { case "$1" in arm64) echo qemu-aarch64 ;; amd64) echo qemu-x86_64 ;; esac; }
 
@@ -128,20 +197,266 @@ with urllib.request.urlopen(req, timeout=60) as r, open(out, "wb") as f:
 PY
 }
 
+# 抓一个网页到 stdout（用来解析目录列表），失败返回 1
+fetch_text() { # $1=url
+  local t; t="$(mktemp)"
+  if fetch "$1" "$t" 2>/dev/null; then cat "$t"; rm -f "$t"; return 0; fi
+  rm -f "$t"; return 1
+}
+
+# 带缓存的下载：同一个 rootfs 在 min/base/dev 三档之间只下一次
+fetch_cached() { # $1=url $2=缓存文件名
+  local url="$1" name="$2" dst="$CACHE/$name"
+  mkdir -p "$CACHE"
+  if [ -s "$dst" ]; then ok "用缓存 $name（$(du -h "$dst" | cut -f1)）"; return 0; fi
+  log "下载 $name"
+  fetch "$url" "$dst.part" || { rm -f "$dst.part"; die "下载失败：$url"; }
+  mv "$dst.part" "$dst"
+  ok "下载完成 $(du -h "$dst" | cut -f1)"
+}
+
+# ---------------------------------------------------------------- 各来源的取包
+# 1) LXC 官方镜像服务器：每天一个新目录，得先抓目录列表取最新那个
+lxc_pick_date() { # $1=project $2=version $3=lxcarch
+  local base="https://images.linuxcontainers.org/images/$1/$2/$3/default/"
+  fetch_text "$base" \
+    | grep -oE 'href="[0-9]{8}_[0-9]{2}(%3A|:)[0-9]{2}/"' \
+    | sed 's/^href="//; s|/"$||; s|/$||' \
+    | sort | tail -1
+}
+
+lxc_rootfs() { # $1=out
+  local out="$1" proj ver lac d base want have name
+  proj="${D_LXC_PROJECT[$DISTRO]}"; ver="${D_LXC_VERSION[$DISTRO]}"
+  lac="$(arch_lxc "$ARCH")"
+  d="$(lxc_pick_date "$proj" "$ver" "$lac")"
+  [ -n "$d" ] || die "取不到 $proj/$ver/$lac 的镜像日期目录（网络？站点改版？）"
+  VER="$ver-$(echo "$d" | sed 's/%3A/:/')"
+  base="https://images.linuxcontainers.org/images/$proj/$ver/$lac/default/$d"
+  log "LXC 镜像 $proj/$ver/$lac @ $d"
+
+  name="lxc-$proj-$ver-$lac-$d.tar.xz"
+  fetch_cached "$base/rootfs.tar.xz" "$name"
+
+  want="$(fetch_text "$base/SHA256SUMS" | awk '$2=="rootfs.tar.xz"{print $1}')"
+  have="$(sha256sum "$CACHE/$name" | awk '{print $1}')"
+  if [ -n "$want" ]; then
+    [ "$want" = "$have" ] || die "LXC rootfs 校验失败（下载被截断？）"
+    ok "SHA256 校验通过"
+  else
+    warn "拿不到 SHA256SUMS，跳过校验"
+  fi
+
+  tar -xf "$CACHE/$name" -C "$out"
+}
+
+# 2) 官方直接给的 rootfs 压缩包
+tarball_url() { # $1=arch  → 输出 url
+  case "$DISTRO" in
+    archlinux)
+      case "$1" in
+        arm64) echo "http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" ;;
+        *) die "Arch 只有 arm64（x86 版是 .tar.zst，应用不认）" ;;
+      esac ;;
+    kalinethunter)
+      # minimal 比 nano 小（120MB vs 170MB），full 是 1.7GB 的大全
+      case "$1" in
+        arm64) echo "https://kali.download/nethunter-images/current/rootfs/kali-nethunter-rootfs-minimal-arm64.tar.xz" ;;
+        amd64) echo "https://kali.download/nethunter-images/current/rootfs/kali-nethunter-rootfs-minimal-amd64.tar.xz" ;;
+      esac ;;
+    void)
+      local a name
+      case "$1" in arm64) a=aarch64 ;; amd64) a=x86_64 ;; esac
+      # 只取 glibc 版：musl 版能装，但 pip 装包时 wheel 覆盖率差很多
+      name="$(fetch_text "https://repo-default.voidlinux.org/live/current/" \
+              | grep -oE "void-$a-ROOTFS-[0-9]{8}\.tar\.xz" | sort -u | tail -1)"
+      [ -n "$name" ] || die "取不到 Void $a 的 ROOTFS 文件名"
+      echo "https://repo-default.voidlinux.org/live/current/$name" ;;
+  esac
+}
+
+tarball_rootfs() { # $1=out
+  local out="$1" url name
+  url="$(tarball_url "$ARCH")"
+  name="$(basename "$url")"
+  case "$DISTRO" in
+    void)      VER="${name#void-*-ROOTFS-}"; VER="${VER%.tar.xz}" ;;
+    archlinux) VER="${name#ArchLinuxARM-}"; VER="${VER%-latest.tar.gz}" ;;
+  esac
+  log "$DISTRO 官方 rootfs：$name"
+  fetch_cached "$url" "$name"
+  tar -xf "$CACHE/$name" -C "$out"
+}
+
+# 3) docker save 格式（opencloudos）：外层是 OCI/docker 打包，里面 */layer.tar 才是 rootfs
+dockersave_rootfs() { # $1=out
+  local out="$1" a base d f name tmp layer want have
+  case "$ARCH" in arm64) a=aarch64 ;; amd64) a=x86_64 ;; esac
+  base="https://mirrors.opencloudos.tech/opencloudos/$D_VERSION_MAJOR/images/docker/$a"
+
+  d="$(fetch_text "$base/" | grep -oE '>[0-9]{8}\.[0-9]+/' | tr -d '>/' | sort | tail -1)"
+  [ -n "$d" ] || die "取不到 OpenCloudOS $a 的镜像目录（mirrors.opencloudos.tech 打不开？）"
+  f="$(fetch_text "$base/$d/" | grep -oE "OpenCloudOS-Container-Minimal-[^\"<]+\.$a\.tar\.xz" | sort -u | head -1)"
+  [ -n "$f" ] || die "取不到 OpenCloudOS Minimal $a 的包名"
+
+  VER="${f#OpenCloudOS-Container-Minimal-}"; VER="${VER%.$a.tar.xz}"
+  log "OpenCloudOS $VER（docker save 格式，稍后展开 layer.tar）"
+
+  fetch_cached "$base/$d/$f" "$f"
+  want="$(fetch_text "$base/$d/$f.sha256" | awk '{print $1}' | head -1)"
+  have="$(sha256sum "$CACHE/$f" | awk '{print $1}')"
+  if [ -n "$want" ]; then
+    [ "$want" = "$have" ] || die "OpenCloudOS 包校验失败"
+    ok "SHA256 校验通过"
+  fi
+
+  tmp="$(mktemp -d)"
+  tar -xf "$CACHE/$f" -C "$tmp" --wildcards '*/layer.tar' || { rm -rf "$tmp"; die "解不出 layer.tar"; }
+  layer="$(find "$tmp" -name layer.tar -print -quit)"
+  [ -n "$layer" ] || { rm -rf "$tmp"; die "docker save 包里没有 layer.tar"; }
+  log "展开 layer.tar（$(du -h "$layer" | cut -f1)）"
+  tar -xf "$layer" -C "$out"
+  rm -rf "$tmp"
+}
+
+# ---------------------------------------------------------------- chroot 辅助
+MOUNTED=()
+chroot_cleanup() {
+  local i
+  for ((i=${#MOUNTED[@]}-1;i>=0;i--)); do umount "${MOUNTED[i]}" 2>/dev/null || true; done
+  MOUNTED=()
+}
+
+# 交叉构建时把 qemu 放进 rootfs（必须在 mount 之前做）
+chroot_install_qemu() { # $1=root
+  QDST=""
+  [ "$ARCH" = "$(host_arch)" ] && return 0
+  local qsrc ipath
+  qsrc="$(qemu_interpreter "$ARCH")" || die "找不到 qemu 解释器：sudo apt install qemu-user-binfmt-hwe"
+  # 必须放到 binfmt 注册的那个路径上：chroot 之后内核是按这个路径去找解释器的
+  ipath="$(binfmt_interpreter "$ARCH")"
+  [ -n "$ipath" ] || ipath="/usr/bin/$(basename "$qsrc")"
+  mkdir -p "$1$(dirname "$ipath")"
+  cp "$qsrc" "$1$ipath"
+  QDST="$1$ipath"
+}
+
+chroot_prepare() { # $1=root
+  local root="$1"
+  mkdir -p "$root/proc" "$root/dev" "$root/sys"
+  mount -t proc none "$root/proc" 2>/dev/null && MOUNTED+=("$root/proc") || true
+  mount --bind /dev "$root/dev"   2>/dev/null && MOUNTED+=("$root/dev")  || true
+  mount --bind /sys "$root/sys"   2>/dev/null && MOUNTED+=("$root/sys")  || true
+
+  # 某些受限环境 mount 会"假成功"但把 chroot 弄坏，探一下
+  if ! chroot "$root" /bin/true 2>/dev/null; then
+    warn "挂载后 chroot 不可用，卸掉重试"
+    chroot_cleanup
+    chroot "$root" /bin/true 2>/dev/null || die "chroot 不可用（换真机 / sudo -i 重试）"
+  fi
+}
+
+# 装包前先把 DNS 写好：zypper / dnf / pacman 没有可用 DNS 会直接死在第一秒
+write_net_conf() { # $1=root
+  local root="$1"
+  rm -f "$root/etc/resolv.conf"
+  printf '# generated by android-proot-rootfs\nnameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver 223.5.5.5\noptions edns0 trust-ad\n' \
+    > "$root/etc/resolv.conf"
+  rm -f "$root/etc/hosts"
+  printf '127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n' > "$root/etc/hosts"
+}
+
+# ---------------------------------------------------------------- 装包
+retry3() { # $* = 命令
+  local i
+  for i in 1 2 3; do
+    "$@" && return 0
+    [ "$i" = 3 ] && return 1
+    warn "第 $i 次失败，5 秒后重试"
+    sleep 5
+  done
+}
+
+install_pkgs() { # $1=root $2=pm $3=tier
+  local root="$1" pm="$2" tier="$3" pkgs
+  pkgs="$(pkgs_for "$pm" "$tier")"
+  if [ -z "$pkgs" ]; then ok "此档位无需额外装包（镜像已自带）"; return 0; fi
+  log "装包（$pm / $tier）：$pkgs"
+
+  case "$pm" in
+    apt)
+      chroot "$root" /usr/bin/env DEBIAN_FRONTEND=noninteractive HOME=/root \
+        /usr/bin/apt-get update -qq || warn "apt-get update 有警告，继续"
+      retry3 chroot "$root" /usr/bin/env DEBIAN_FRONTEND=noninteractive HOME=/root \
+        /usr/bin/apt-get install -y --no-install-recommends $pkgs \
+        || die "apt-get install 失败"
+      ;;
+    apk)
+      # 网络抖动时 apk 不重试，这里重试 3 次
+      retry3 chroot "$root" /sbin/apk add --no-cache $pkgs || die "apk add 失败"
+      ;;
+    dnf)
+      retry3 chroot "$root" /usr/bin/env HOME=/root \
+        /usr/bin/dnf -y --setopt=install_weak_deps=False install $pkgs \
+        || die "dnf 装包失败"
+      ;;
+    zypper)
+      # Tumbleweed 是滚动版，zypper 会顺带升级依赖，这是它的正常行为。
+      # 容器镜像里的 keyring 有时比仓库签名旧，会报 "Signature verification failed
+      # for repomd.xml"；这时自动降级重试一次（会打 warn，不静默）。
+      if ! retry3 chroot "$root" /usr/bin/env HOME=/root \
+             /usr/bin/zypper --non-interactive --gpg-auto-import-keys \
+               --no-recommends install $pkgs; then
+        warn "zypper 正常安装失败，降级到 --no-gpg-checks 重试（镜像来自 LXC 官方源，非第三方）"
+        retry3 chroot "$root" /usr/bin/env HOME=/root \
+          /usr/bin/zypper --non-interactive --no-gpg-checks \
+            --no-recommends install $pkgs \
+          || die "zypper 装包失败（两种方式都失败）"
+      fi
+      ;;
+    pacman)
+      # Arch 的 rootfs 是某个时间点的快照，keyring 可能已经过期
+      chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman -Sy --noconfirm || true
+      if ! retry3 chroot "$root" /usr/bin/env HOME=/root \
+             /usr/bin/pacman -S --needed --noconfirm $pkgs; then
+        warn "pacman 失败，重建 keyring 后重试"
+        chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman-key --init || true
+        chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman-key --populate archlinuxarm || true
+        chroot "$root" /usr/bin/env HOME=/root \
+          /usr/bin/pacman -S --needed --noconfirm $pkgs || die "pacman 装包失败"
+      fi
+      ;;
+    xbps)
+      retry3 chroot "$root" /usr/bin/env HOME=/root /usr/bin/xbps-install -S -y $pkgs \
+        || die "xbps 装包失败"
+      ;;
+    *) die "未知包管理器: $pm" ;;
+  esac
+  ok "装包完成"
+}
+
 # ---------------------------------------------------------------- 收尾
 # 纯文件操作，不需要执行目标架构的二进制，交叉构建也安全
-postprocess() { # $1=root $2=family
-  local root="$1" fam="$2"
+postprocess() { # $1=root $2=pm
+  local root="$1" pm="$2"
   log "清理缓存与体积"
 
+  # 各包管理器的下载缓存
   rm -rf "$root"/var/cache/apt/archives/*.deb 2>/dev/null || true
   rm -rf "$root"/var/cache/apt/*.bin 2>/dev/null || true
   rm -rf "$root"/var/lib/apt/lists/* 2>/dev/null || true
   rm -rf "$root"/var/cache/apk/* 2>/dev/null || true
+  rm -rf "$root"/var/cache/dnf/* 2>/dev/null || true
+  rm -rf "$root"/var/cache/yum/* 2>/dev/null || true
+  rm -rf "$root"/var/cache/zypp/*/* 2>/dev/null || true
+  rm -rf "$root"/var/cache/pacman/pkg/* 2>/dev/null || true
+  rm -rf "$root"/var/cache/xbps/* 2>/dev/null || true
   rm -rf "$root"/var/log/* 2>/dev/null || true
   rm -rf "$root"/tmp/* "$root"/var/tmp/* 2>/dev/null || true
   rm -rf "$root"/usr/share/man/* "$root"/usr/share/info/* 2>/dev/null || true
-  [ "$fam" = alpine ] && rm -rf "$root"/usr/share/doc/* "$root"/usr/share/locale/* 2>/dev/null || true
+  case "$pm" in
+    apk|pacman|xbps) rm -rf "$root"/usr/share/doc/* "$root"/usr/share/locale/* 2>/dev/null || true ;;
+  esac
 
   # /proc /sys /dev 由 proot 从宿主机绑进来，不能带内容；
   # 但如果是真挂载就先别删（会删到宿主机上）
@@ -151,43 +466,47 @@ postprocess() { # $1=root $2=family
     rm -rf "$root/$d"/* 2>/dev/null || true
   done
 
-  : > "$root/etc/machine-id"
+  : > "$root/etc/machine-id" 2>/dev/null || true
 
-  # DNS 必须是普通文件：发行版自带的 /etc/resolv.conf 常是软链到 127.0.0.53，
-  # 在 proot 里解析不了，会导致 apt/git/pip 全部连不上网
-  rm -f "$root/etc/resolv.conf"
-  printf '# generated by android-proot-rootfs\nnameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver 223.5.5.5\noptions edns0 trust-ad\n' \
-    > "$root/etc/resolv.conf"
-  chmod 644 "$root/etc/resolv.conf"
+  # DNS 必须是普通文件：openSUSE 的 /etc/resolv.conf 是软链到 /run/netconfig/，
+  # 在 proot 里解析不了，会让 apt/zypper/pacman 全部连不上网
+  write_net_conf "$root"
+  chmod 644 "$root/etc/resolv.conf" "$root/etc/hosts"
 
+  # 同理，openSUSE 的 /etc/hostname 也可能是软链，先断开再写
+  rm -f "$root/etc/hostname"
   echo "localhost" > "$root/etc/hostname"
-  printf '127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n' > "$root/etc/hosts"
 
   mkdir -p "$root/tmp" "$root/var/tmp" "$root/root" "$root/workspace"
   chmod 1777 "$root/tmp" "$root/var/tmp"
   chmod 700 "$root/root"
   chmod 755 "$root" "$root/workspace"
 
-  if [ "$fam" = deb ]; then
+  # 有 bash 就把 root 的登录 shell 换过去
+  if [ -x "$root/bin/bash" ] && [ -f "$root/etc/passwd" ]; then
+    sed -i 's|^root:\([^:]*\):0:0:\([^:]*\):\([^:]*\):[^:]*$|root:\1:0:0:\2:\3:/bin/bash|' "$root/etc/passwd"
+  fi
+
+  if [ "$pm" = apt ]; then
     mkdir -p "$root/etc/default"
     echo "LANG=C.UTF-8" > "$root/etc/default/locale"
-
-    # root 的登录 shell 换成 bash（有的话）
-    if [ -x "$root/bin/bash" ] && [ -f "$root/etc/passwd" ]; then
-      sed -i 's|^root:\([^:]*\):0:0:\([^:]*\):\([^:]*\):[^:]*$|root:\1:0:0:\2:\3:/bin/bash|' "$root/etc/passwd"
-    fi
-
     # 装包时不要尝试拉起服务（proot 里没有 init）
+    mkdir -p "$root/usr/sbin"
     printf '#!/bin/sh\nexit 101\n' > "$root/usr/sbin/policy-rc.d"
     chmod 755 "$root/usr/sbin/policy-rc.d"
-
     mkdir -p "$root/etc/apt/apt.conf.d"
     cat > "$root/etc/apt/apt.conf.d/99-android-proot" <<'APTEOF'
 Acquire::Retries "5";
 Acquire::Languages "none";
 Dpkg::Options { "--force-confdef"; "--force-confold"; };
 APTEOF
+  else
+    # systemd 系（openSUSE / Alma / OpenCloudOS / Arch / Void）读的是 locale.conf
+    echo "LANG=C.UTF-8" > "$root/etc/locale.conf" 2>/dev/null || true
   fi
+
+  # SELinux 的 relabel 标记在 proot 里没人处理，留着只会误导
+  rm -f "$root/.autorelabel" 2>/dev/null || true
 
   cat > "$root/etc/android-proot-release" <<EOF
 distro=$DISTRO
@@ -294,9 +613,8 @@ verify() { # $1=产物
   local f="$1"
   gzip -t "$f" 2>/dev/null || die "gzip 校验失败，包被截断：$f"
 
-  local list; list="$(tar -tzf "$f")"
   local tf; tf="$(mktemp)"
-  printf '%s\n' "$list" > "$tf"
+  tar -tzf "$f" > "$tf" || { rm -f "$tf"; die "tar 列不出内容：$f"; }
 
   # 不能写 tar | grep -q：set -o pipefail 下 grep 提前退出会让上游吃 SIGPIPE(141)，
   # 明明匹配上了也会被当成失败。先落盘再 grep 最稳。
@@ -309,8 +627,18 @@ verify() { # $1=产物
     die "缺少 bin/sh —— 应用会认为这不是可用 rootfs"
   fi
 
-  local modes; modes="$(tar -tvzf "$f" | awk '$NF=="etc/resolv.conf"||$NF=="./etc/resolv.conf"{print $1}')"
-  case "$modes" in l*) rm -f "$tf"; die "/etc/resolv.conf 是软链，proot 里会 DNS 全挂" ;; esac
+  # proot 的命令行是以 /usr/bin/env -i 开头的，没有它一条命令都跑不起来
+  if ! grep -qE '(^|/)usr/bin/env$' "$tf"; then
+    rm -f "$tf"
+    die "缺少 /usr/bin/env —— 应用执行命令时起不来"
+  fi
+
+  # /etc/resolv.conf 必须是普通文件。注意不能拿 tar -tv 的 $NF 判断：
+  # 软链那一行的最后一列是链接目标，不是文件名，$NF==... 永远不成立
+  if tar -tvzf "$f" 2>/dev/null | grep -E '^l' | grep -qE 'etc/resolv\.conf'; then
+    rm -f "$tf"
+    die "/etc/resolv.conf 是软链，proot 里会 DNS 全挂"
+  fi
 
   local n; n="$(wc -l < "$tf")"
   rm -f "$tf"
@@ -322,10 +650,11 @@ build_alpine() { # $1=root
   local root="$1" apk_arch rel ver mini
   apk_arch="$(arch_apk "$ARCH")"
   rel="$RELEASE"
-  ver="$(fetch "$MIRROR/$rel/releases/$apk_arch/" /dev/stdout \
+  ver="$(fetch_text "$MIRROR/$rel/releases/$apk_arch/" \
         | grep -oE "alpine-minirootfs-${rel#v}\.[0-9]+-${apk_arch}\.tar\.gz" \
         | sed -E "s/alpine-minirootfs-(.*)-${apk_arch}\.tar\.gz/\1/" | sort -V | tail -1)"
   [ -n "$ver" ] || die "取不到 Alpine $rel 的 minirootfs 版本"
+  VER="$ver"
 
   mini="$WORK/minirootfs.tar.gz"
   log "Alpine $ver ($apk_arch) minirootfs"
@@ -338,7 +667,6 @@ build_alpine() { # $1=root
   [ "$want" = "$have" ] || die "minirootfs 校验失败（下载被截断？）"
   ok "minirootfs 校验通过"
 
-  mkdir -p "$root"
   tar -xzf "$mini" -C "$root"
 
   mkdir -p "$root/etc/apk"
@@ -354,47 +682,6 @@ build_alpine() { # $1=root
     mip="$(getent ahostsv4 "$mhost" 2>/dev/null | awk 'NR==1{print $1}')"
     [ -n "$mip" ] && printf '%s %s\n' "$mip" "$mhost" >> "$root/etc/hosts"
   fi
-
-  local qdst=""
-  if [ "$ARCH" != "$(host_arch)" ]; then
-    local qsrc; qsrc="$(qemu_interpreter "$ARCH")" || die "找不到 qemu 解释器（apt install qemu-user-binfmt-hwe）"
-    # 必须放到 binfmt 注册的那个路径上：chroot 之后内核是按这个路径去找解释器的
-    local ipath; ipath="$(binfmt_interpreter "$ARCH")"
-    [ -n "$ipath" ] || ipath="/usr/bin/$(basename "$qsrc")"
-    mkdir -p "$root$(dirname "$ipath")"
-    cp "$qsrc" "$root$ipath"
-    qdst="$root$ipath"
-  fi
-
-  MOUNTED=()
-  cleanup() { local i; for ((i=${#MOUNTED[@]}-1;i>=0;i--)); do umount "${MOUNTED[i]}" 2>/dev/null||true; done; MOUNTED=(); }
-  trap cleanup EXIT
-
-  mkdir -p "$root/proc" "$root/dev" "$root/sys"
-  mount -t proc none "$root/proc" 2>/dev/null && MOUNTED+=("$root/proc") || true
-  mount --bind /dev "$root/dev"   2>/dev/null && MOUNTED+=("$root/dev")  || true
-  mount --bind /sys "$root/sys"   2>/dev/null && MOUNTED+=("$root/sys")  || true
-
-  # 某些受限环境 mount 会"假成功"但把 chroot 弄坏，探一下
-  if ! chroot "$root" /bin/true 2>/dev/null; then
-    warn "挂载后 chroot 不可用，卸掉重试"
-    cleanup
-    chroot "$root" /bin/true 2>/dev/null || die "chroot 不可用（换真机 / sudo -i 重试）"
-  fi
-
-  local pkgs; pkgs="$(pkgs_for alpine "$TIER")"
-  log "apk add --no-cache $pkgs"
-  # 网络抖动时 apk 不重试，这里重试 3 次
-  local i
-  for i in 1 2 3; do
-    chroot "$root" /sbin/apk add --no-cache $pkgs && break
-    [ "$i" = 3 ] && die "apk add 失败"
-    warn "apk add 第 $i 次失败，5 秒后重试"; sleep 5
-  done
-  ok "apk add 完成"
-
-  cleanup
-  [ -n "$qdst" ] && rm -f "$qdst"
   echo "alpine-minirootfs-$ver-$apk_arch" > "$root/etc/android-proot-base"
 }
 
@@ -404,7 +691,7 @@ build_deb() { # $1=root
   command -v mmdebstrap >/dev/null 2>&1 || die "缺 mmdebstrap：sudo apt install mmdebstrap"
   [ -f "$KEYRING" ] || die "缺 keyring $KEYRING：sudo apt install debian-archive-keyring ubuntu-keyring"
 
-  local pkgs; pkgs="$(pkgs_for deb "$TIER")"
+  local pkgs; pkgs="$(pkgs_for apt "$TIER")"
   log "mmdebstrap $RELEASE/$ARCH"
   log "包：$pkgs"
 
@@ -432,10 +719,21 @@ build_deb() { # $1=root
 build_one() { # $1=distro $2=arch $3=tier
   DISTRO="$1"; ARCH="$2"; TIER="$3"
   [ -n "${D_NAME[$DISTRO]:-}" ] || die "没有这个发行版: $DISTRO"
-  VER="${D_VERSION[$DISTRO]}"; RELEASE="${D_RELEASE[$DISTRO]}"
-  FAMILY="${D_FAMILY[$DISTRO]}"; COMPONENTS="${D_COMPONENTS[$DISTRO]:-}"
+  VER="${D_VERSION[$DISTRO]}"; RELEASE="${D_RELEASE[$DISTRO]:-}"
+  FAMILY="${D_FAMILY[$DISTRO]}"; PM="${D_PM[$DISTRO]}"
+  COMPONENTS="${D_COMPONENTS[$DISTRO]:-}"
   KEYRING="${D_KEYRING[$DISTRO]:-}"
-  if [ -n "$MIRROR_ARG" ]; then MIRROR="$MIRROR_ARG"; else MIRROR="${D_MIRROR[$DISTRO]}"; fi
+  VERSION_MAJOR="${D_VERSION[$DISTRO]%%.*}"
+  D_VERSION_MAJOR="$VERSION_MAJOR"
+
+  # 有些发行版只有部分架构
+  local supported="${D_ARCHES[$DISTRO]:-arm64 amd64}"
+  case " $supported " in
+    *" $ARCH "*) : ;;
+    *) die "$DISTRO 不支持 $ARCH（支持：$supported）" ;;
+  esac
+
+  if [ -n "$MIRROR_ARG" ]; then MIRROR="$MIRROR_ARG"; else MIRROR="${D_MIRROR[$DISTRO]:-}"; fi
   # Ubuntu 的 arm64 包在 ubuntu-ports，不在主归档；按架构自动挑对
   if [ "$ARCH" != amd64 ] && [ "${D_NAME[$DISTRO]}" = "Ubuntu" ]; then
     case "$MIRROR" in
@@ -460,19 +758,53 @@ build_one() { # $1=distro $2=arch $3=tier
   BUILT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local epoch; epoch="$(date -u -d "$BUILT" +%s)"
 
+  CACHE="$PWD/.work/cache"
   WORK="$PWD/.work/$DISTRO-$ARCH-$TIER"
   local root="$WORK/root"
   rm -rf "$WORK"; mkdir -p "$root"
 
-  log "构建 ${D_NAME[$DISTRO]} $VER（$RELEASE）/ $ARCH / $TIER"
+  log "构建 ${D_NAME[$DISTRO]} $VER（$ARCH / $TIER）"
+
+  trap chroot_cleanup EXIT
 
   case "$FAMILY" in
-    deb)    build_deb "$root" ;;
-    alpine) build_alpine "$root" ;;
+    deb)
+      build_deb "$root"
+      ;;
+    alpine)
+      build_alpine "$root"
+      chroot_install_qemu "$root"
+      chroot_prepare "$root"
+      install_pkgs "$root" "$PM" "$TIER"
+      ;;
+    lxc)
+      lxc_rootfs "$root"
+      chroot_install_qemu "$root"
+      write_net_conf "$root"
+      chroot_prepare "$root"
+      install_pkgs "$root" "$PM" "$TIER"
+      ;;
+    tarball)
+      tarball_rootfs "$root"
+      chroot_install_qemu "$root"
+      write_net_conf "$root"
+      chroot_prepare "$root"
+      install_pkgs "$root" "$PM" "$TIER"
+      ;;
+    dockersave)
+      dockersave_rootfs "$root"
+      chroot_install_qemu "$root"
+      write_net_conf "$root"
+      chroot_prepare "$root"
+      install_pkgs "$root" "$PM" "$TIER"
+      ;;
     *) die "未知 family: $FAMILY" ;;
   esac
 
-  postprocess "$root" "$FAMILY"
+  chroot_cleanup
+  [ -n "${QDST:-}" ] && rm -f "$QDST"
+
+  postprocess "$root" "$PM"
 
   local name="$DISTRO-$ARCH-$TIER.tar.gz"
   local out="$PWD/out/$name"
@@ -496,14 +828,15 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --mirror) MIRROR_ARG="$2"; shift 2 ;;
     --keep)   KEEP=1; shift ;;
-    all)      TARGETS=("${DISTROS[@]}"); shift ;;
-    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    all)      TARGETS=("${DISTROS[@]}" "${NEW_DISTROS[@]}"); shift ;;
+    all-new|new-all) TARGETS=("${NEW_DISTROS[@]}"); shift ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) TARGETS+=("$1"); shift ;;
   esac
 done
 
 if [ ${#TARGETS[@]} -eq 0 ]; then
-  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 1
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1
 fi
 
 if [ ${#TARGETS[@]} -ge 3 ] && [ -n "${D_NAME[${TARGETS[0]}]:-}" ]; then
