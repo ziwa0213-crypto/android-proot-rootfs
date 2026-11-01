@@ -48,12 +48,12 @@ Android 上现成的 rootfs 包通常有三个毛病：
 
 文件名规则：`<发行版>-<版本>-<架构>-<档位>.tar.gz`
 
-发布后走稳定地址，`latest` 永远指向最新一次正式发布：
+每个发行版单独一个 release，标签固定为 `<发行版>-<版本>`；重新构建时原地替换文件，链接永久有效：
 
 ```
-https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/latest/download/debian-12-arm64-base.tar.gz
-https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/latest/download/ubuntu-24.04-arm64-base.tar.gz
-https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/latest/download/alpine-3.22-arm64-min.tar.gz
+https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/debian-12/debian-12-arm64-base.tar.gz
+https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/ubuntu-24.04/ubuntu-24.04-arm64-base.tar.gz
+https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/alpine-3.22/alpine-3.22-arm64-min.tar.gz
 ```
 
 > 手机几乎都是 `arm64`。`amd64` 是给模拟器 / WSA / 桌面容器用的。

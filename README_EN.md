@@ -46,12 +46,12 @@ Five distributions × two architectures × three tiers.
 
 File naming: `<distro>-<version>-<arch>-<tier>.tar.gz`
 
-Once a release is published, these stable URLs always point at the newest one:
+Each distribution gets its own release, tagged `<distro>-<version>`. Rebuilds replace the files in place, so these URLs stay valid:
 
 ```
-https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/latest/download/debian-12-arm64-base.tar.gz
-https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/latest/download/ubuntu-24.04-arm64-base.tar.gz
-https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/latest/download/alpine-3.22-arm64-min.tar.gz
+https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/debian-12/debian-12-arm64-base.tar.gz
+https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/ubuntu-24.04/ubuntu-24.04-arm64-base.tar.gz
+https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/alpine-3.22/alpine-3.22-arm64-min.tar.gz
 ```
 
 > Phones are almost always `arm64`. Use `amd64` for emulators, Windows Subsystem for Android, or desktop containers.

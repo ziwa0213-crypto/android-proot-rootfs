@@ -48,7 +48,7 @@ def main() -> int:
         rows.append(dict(
             name=f.name, distro=m["distro"], version=m["version"], arch=m["arch"],
             tier=m["tier"], size=st.st_size, sha256=sha(f),
-            url=f"https://github.com/{REPO}/releases/latest/download/{f.name}",
+            url=f"https://github.com/{REPO}/releases/download/{m['distro']}-{m['version']}/{f.name}",
         ))
     if not rows:
         print("out/ 里没有产物", file=sys.stderr)
