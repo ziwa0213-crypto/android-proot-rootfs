@@ -201,21 +201,9 @@ EOF
 }
 
 # ---------------------------------------------------------------- 打包 + 自检
-pack() { # $1=root $2=输出 $3=epoch
-  local root="$1" out="$2" epoch="$3"
-  local gz
-  if command -v pigz >/dev/null 2>&1; then gz=(pigz -9 -n -p "$(nproc)" -c); else gz=(gzip -9 -n -c); fi
-  mkdir -p "$(dirname "$out")"
-  log "打包 $(basename "$out")（未压缩 $(du -sh "$root" | cut -f1)）"
-  # proot 的 --link2symlink 会把硬链接改写成「一份存储文件 + 一堆指向它的绝对软链」：
-  #   usr/bin/.l2s.coreutils.dpkg-new0001   <- 存储，真内容（10 MB，114 个名字共用）
-  #   usr/bin/coreutils        -> /abs/path/.../.l2s.coreutils.dpkg-new0001
-  #   usr/lib/cargo/bin/coreutils/yes -> 同一个存储文件
-  # 这些绝对链打进包里全是坏的；直接删存储文件又会丢内容（114 个名字共用它）。
-  # 所以：把存储文件改名为 .<原名>.real，软链改写成树内相对路径，剩下的孤儿 .l2s.* 再删。
-  if find "$root" -name '.l2s.*' -print -quit 2>/dev/null | grep -q .; then
-    log "修正 proot 的 link2symlink 残留（绝对软链 → 相对软链）"
-    python3 - "$root" <<'PYFIX' || warn "link2symlink 修正失败，产物可能含坏链"
+fix_links() { # $1=root  修 proot(--link2symlink) 留下的绝对软链
+  command -v python3 >/dev/null 2>&1 || { warn "缺 python3，跳过 link2symlink 修正"; return 0; }
+  python3 - "$1" <<'PYFIX' || warn "link2symlink 修正失败，产物可能含坏链"
 import os, sys
 root = os.path.abspath(sys.argv[1])
 renamed = {}
@@ -224,8 +212,8 @@ def newname(t):
     if b.startswith(".l2s."):
         b = b[len(".l2s."):]
     return os.path.join(d, "." + b + ".real")
-def store(p, t):
-    # 把存储文件改名成正常名字，返回新路径；同一目标只改一次
+def store(t):
+    # 存储文件改名成正常名字；同一目标只改一次
     n = renamed.get(t)
     if n is None:
         n = newname(t)
@@ -244,11 +232,13 @@ for dirpath, dirnames, filenames in os.walk(root):
         if "/.l2s." not in t:
             continue
         abs_t = t if os.path.isabs(t) else os.path.normpath(os.path.join(dirpath, t))
-        try:
-            os.lstat(abs_t)             # 存储文件还在吗
-        except OSError:
-            continue                    # 内容已经丢了，交给下面的清理
-        n = store(abs_t, abs_t)
+        n = renamed.get(abs_t)          # 先查表：多个名字常共用一个存储，第一个
+        if n is None:                   # 已经把它改名了，后面的不能再 lstat
+            try:
+                os.lstat(abs_t)         # 存储文件还在吗
+            except OSError:
+                continue                # 内容已经丢了，交给下面的清理
+            n = store(abs_t)
         os.remove(p)
         os.symlink(os.path.relpath(n, dirpath), p)
 orphan = 0
@@ -261,15 +251,42 @@ for dirpath, dirnames, filenames in os.walk(root):
                 pass
 print(f"修正 {len(renamed)} 组，清理 {orphan} 个残留", file=sys.stderr)
 PYFIX
-  fi
-  # proot 下偶有文件被 link2symlink 弄成悬空链，tar 遇到会非 0 退出；用 --ignore-failed-read
-  # 保证包能出，但把丢掉的条目数报出来 —— 大于 0 就说明这个环境的 proot 不可信。
+}
+
+pack() { # $1=root $2=输出 $3=epoch
+  local root="$1" out="$2" epoch="$3"
+  local gz
+  if command -v pigz >/dev/null 2>&1; then gz=(pigz -9 -n -p "$(nproc)" -c); else gz=(gzip -9 -n -c); fi
+  mkdir -p "$(dirname "$out")"
+  log "打包 $(basename "$out")（未压缩 $(du -sh "$root" 2>/dev/null | cut -f1)）"
+
+  local tarargs=(--numeric-owner --owner=0 --group=0 --sort=name --mtime="@$epoch" --format=gnu)
   local terr; terr="$(mktemp)"
-  tar --numeric-owner --owner=0 --group=0 --sort=name --mtime="@$epoch" --format=gnu \
-      --ignore-failed-read -C "$root" -cf - . 2>"$terr" | "${gz[@]}" > "$out"
-  local lost; lost="$(grep -c "Cannot stat\|Cannot open" "$terr" 2>/dev/null || true)"
-  [ "${lost:-0}" -eq 0 ] || warn "打包时跳过 $lost 个读不到的条目（proot 的 link2symlink 丢的），见下："
-  [ "${lost:-0}" -eq 0 ] || head -5 "$terr" >&2
+
+  # .l2s. 是 proot 独有的名字，正常的 dpkg/apk 永远不会产生，所以真机上这一步空转。
+  # 但只要有就必须先修：否则 tar 会「成功」地把绝对软链原样打进包里（运行时全是坏链）。
+  if find "$root" -name '.l2s.*' -print -quit 2>/dev/null | grep -q .; then
+    log "修正 proot 的 link2symlink 残留（绝对软链 → 相对软链）"
+    fix_links "$root"
+  fi
+
+  # 先用最严格的方式打一遍：真机上这就是全部逻辑，行为与引入 proot 兼容之前完全一致。
+  # 只有真的撞上 proot 的 --link2symlink 残留（tar 报 Cannot stat/Cannot open）才降级：
+  # 修一遍软链 → 加 --ignore-failed-read 重打 → 报出仍然缺了多少条目。
+  if ! tar "${tarargs[@]}" -C "$root" -cf - . 2>"$terr" | "${gz[@]}" > "$out"; then
+    if grep -qE "Cannot stat|Cannot open" "$terr" 2>/dev/null; then
+      warn "打包遇到读不到的条目，按 proot 的 link2symlink 残留处理"
+      fix_links "$root"
+      tar "${tarargs[@]}" --ignore-failed-read -C "$root" -cf - . 2>"$terr" | "${gz[@]}" > "$out"
+      local lost; lost="$(grep -cE "Cannot stat|Cannot open" "$terr" 2>/dev/null || true)"
+      if [ "${lost:-0}" -gt 0 ]; then
+        warn "二次打包仍跳过 $lost 个条目 —— 产物不完整，这个环境的 proot 丢了数据："
+        grep -E "Cannot stat|Cannot open" "$terr" | head -5 >&2
+      fi
+    else
+      rm -f "$terr"; die "打包失败（原因见上）"
+    fi
+  fi
   rm -f "$terr"
 }
 
