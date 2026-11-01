@@ -77,6 +77,35 @@ die()  { printf '\033[31merror\033[0m %s\n' "$*" >&2; exit 1; }
 host_arch() { case "$(uname -m)" in aarch64|arm64) echo arm64 ;; x86_64|amd64) echo amd64 ;; *) die "构建机架构不支持: $(uname -m)";; esac; }
 arch_apk()  { case "$1" in arm64) echo aarch64 ;; amd64) echo x86_64 ;; esac; }
 qemu_bin()  { case "$1" in arm64) echo qemu-aarch64-static ;; amd64) echo qemu-x86_64-static ;; esac; }
+binfmt_magic() { case "$1" in arm64) echo qemu-aarch64 ;; amd64) echo qemu-x86_64 ;; esac; }
+
+# binfmt 里注册的解释器绝对路径（新版 Ubuntu 是 /usr/libexec/qemu-binfmt/xxx-binfmt-P）
+binfmt_interpreter() {
+  local f="/proc/sys/fs/binfmt_misc/$(binfmt_magic "$1")"
+  [ -r "$f" ] || return 0
+  awk '/^interpreter /{print $2; exit}' "$f"
+}
+
+# 找一份能用的 qemu 静态二进制：PATH 里的优先，否则退回 binfmt 注册的那份
+qemu_interpreter() {
+  local q; q="$(qemu_bin "$1")"
+  if command -v "$q" >/dev/null 2>&1; then command -v "$q"; return 0; fi
+  local ip; ip="$(binfmt_interpreter "$1")"
+  [ -n "$ip" ] && [ -x "$ip" ] && { echo "$ip"; return 0; }
+  return 1
+}
+
+# mmdebstrap 只认 qemu-<arch>-static 这个名字；新版发行版包里可能只有
+# /usr/libexec/qemu-binfmt/<arch>-binfmt-P，这里补一个软链哄它
+ensure_qemu_static() {
+  local q; q="$(qemu_bin "$1")"
+  command -v "$q" >/dev/null 2>&1 && return 0
+  local src; src="$(qemu_interpreter "$1")" || return 1
+  mkdir -p /usr/local/bin
+  ln -sf "$src" "/usr/local/bin/$q" 2>/dev/null || return 1
+  hash -r
+  command -v "$q" >/dev/null 2>&1
+}
 
 fetch() { # $1=url $2=输出文件
   local url="$1" out="$2"
@@ -224,9 +253,13 @@ build_alpine() { # $1=root
 
   local qdst=""
   if [ "$ARCH" != "$(host_arch)" ]; then
-    local qsrc; qsrc="$(command -v "$(qemu_bin "$ARCH")" || true)"
-    [ -n "$qsrc" ] || die "交叉构建需要 $(qemu_bin "$ARCH")（apt install qemu-user-static）"
-    qdst="$root/usr/bin/$(basename "$qsrc")"; cp "$qsrc" "$qdst"
+    local qsrc; qsrc="$(qemu_interpreter "$ARCH")" || die "找不到 qemu 解释器（apt install qemu-user-binfmt-hwe）"
+    # 必须放到 binfmt 注册的那个路径上：chroot 之后内核是按这个路径去找解释器的
+    local ipath; ipath="$(binfmt_interpreter "$ARCH")"
+    [ -n "$ipath" ] || ipath="/usr/bin/$(basename "$qsrc")"
+    mkdir -p "$root$(dirname "$ipath")"
+    cp "$qsrc" "$root$ipath"
+    qdst="$root$ipath"
   fi
 
   MOUNTED=()
@@ -302,10 +335,14 @@ build_one() { # $1=distro $2=arch $3=tier
 
   [ "$(id -u)" -eq 0 ] || die "需要 root：sudo ./build.sh ..."
 
-  # 交叉构建检查
+  # 交叉构建检查：qemu 二进制或 binfmt 注册，有一样就够
   if [ "$ARCH" != "$(host_arch)" ]; then
-    command -v "$(qemu_bin "$ARCH")" >/dev/null 2>&1 \
-      || die "交叉构建 $ARCH 需要 $(qemu_bin "$ARCH")：sudo apt install qemu-user-static binfmt-support"
+    if ! qemu_interpreter "$ARCH" >/dev/null 2>&1; then
+      die "交叉构建 $ARCH 需要 qemu：
+  Ubuntu/Debian: sudo apt install qemu-user-binfmt-hwe     （老版本叫 qemu-user-static）
+  装完确认：ls /proc/sys/fs/binfmt_misc/ | grep $(binfmt_magic "$ARCH")"
+    fi
+    ensure_qemu_static "$ARCH" || warn "没能建 qemu-$( [ "$ARCH" = arm64 ] && echo aarch64 || echo x86_64 )-static 软链，mmdebstrap 可能会报错"
   fi
 
   BUILT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
