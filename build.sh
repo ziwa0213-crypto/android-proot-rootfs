@@ -4,7 +4,7 @@
 #
 #   sudo ./build.sh <发行版> <架构> <档位>
 #
-#   发行版：debian-12 | debian-13 | ubuntu-24.04 | ubuntu-26.04 | alpine-3.22
+#   发行版：debian-12 | debian-13 | ubuntu-24.04 | ubuntu-26.04 | alpine-3.24
 #   架构  ：arm64 | amd64
 #   档位  ：min | base | dev
 #
@@ -19,7 +19,7 @@ set -euo pipefail
 # MIRROR 可被 --mirror 覆盖；国内建议清华/中科大，构建快 5~10 倍
 declare -A D_NAME D_VERSION D_RELEASE D_FAMILY D_MIRROR D_COMPONENTS D_KEYRING
 
-DISTROS=(debian-12 debian-13 ubuntu-24.04 ubuntu-26.04 alpine-3.22)
+DISTROS=(debian-12 debian-13 ubuntu-24.04 ubuntu-26.04 alpine-3.24)
 
 D_NAME[debian-12]="Debian";        D_VERSION[debian-12]="12";    D_RELEASE[debian-12]=bookworm
 D_FAMILY[debian-12]=deb;           D_MIRROR[debian-12]="http://deb.debian.org/debian"
@@ -41,8 +41,8 @@ D_FAMILY[ubuntu-26.04]=deb;        D_MIRROR[ubuntu-26.04]="http://archive.ubuntu
 D_COMPONENTS[ubuntu-26.04]="main,restricted,universe,multiverse"
 D_KEYRING[ubuntu-26.04]="/usr/share/keyrings/ubuntu-archive-keyring.gpg"
 
-D_NAME[alpine-3.22]="Alpine";      D_VERSION[alpine-3.22]="3.22";  D_RELEASE[alpine-3.22]=v3.22
-D_FAMILY[alpine-3.22]=alpine;      D_MIRROR[alpine-3.22]="https://dl-cdn.alpinelinux.org/alpine"
+D_NAME[alpine-3.24]="Alpine";      D_VERSION[alpine-3.24]="3.24";  D_RELEASE[alpine-3.24]=v3.24
+D_FAMILY[alpine-3.24]=alpine;      D_MIRROR[alpine-3.24]="https://dl-cdn.alpinelinux.org/alpine"
 
 # ---------------------------------------------------------------- 档位包清单
 # min ⊂ base ⊂ dev（后面的档位会把前面的一起装上）
@@ -207,8 +207,70 @@ pack() { # $1=root $2=输出 $3=epoch
   if command -v pigz >/dev/null 2>&1; then gz=(pigz -9 -n -p "$(nproc)" -c); else gz=(gzip -9 -n -c); fi
   mkdir -p "$(dirname "$out")"
   log "打包 $(basename "$out")（未压缩 $(du -sh "$root" | cut -f1)）"
+  # proot 的 --link2symlink 会把硬链接改写成「一份存储文件 + 一堆指向它的绝对软链」：
+  #   usr/bin/.l2s.coreutils.dpkg-new0001   <- 存储，真内容（10 MB，114 个名字共用）
+  #   usr/bin/coreutils        -> /abs/path/.../.l2s.coreutils.dpkg-new0001
+  #   usr/lib/cargo/bin/coreutils/yes -> 同一个存储文件
+  # 这些绝对链打进包里全是坏的；直接删存储文件又会丢内容（114 个名字共用它）。
+  # 所以：把存储文件改名为 .<原名>.real，软链改写成树内相对路径，剩下的孤儿 .l2s.* 再删。
+  if find "$root" -name '.l2s.*' -print -quit 2>/dev/null | grep -q .; then
+    log "修正 proot 的 link2symlink 残留（绝对软链 → 相对软链）"
+    python3 - "$root" <<'PYFIX' || warn "link2symlink 修正失败，产物可能含坏链"
+import os, sys
+root = os.path.abspath(sys.argv[1])
+renamed = {}
+def newname(t):
+    d, b = os.path.split(t)
+    if b.startswith(".l2s."):
+        b = b[len(".l2s."):]
+    return os.path.join(d, "." + b + ".real")
+def store(p, t):
+    # 把存储文件改名成正常名字，返回新路径；同一目标只改一次
+    n = renamed.get(t)
+    if n is None:
+        n = newname(t)
+        if os.path.lexists(n):
+            os.remove(n)
+        os.rename(t, n)
+        renamed[t] = n
+    return n
+for dirpath, dirnames, filenames in os.walk(root):
+    for name in list(dirnames) + filenames:
+        p = os.path.join(dirpath, name)
+        try:
+            t = os.readlink(p)          # 不是软链就抛 OSError；不能用 islink()，
+        except OSError:                 # 悬空链在 proot 下 lstat 会返回 EPERM
+            continue
+        if "/.l2s." not in t:
+            continue
+        abs_t = t if os.path.isabs(t) else os.path.normpath(os.path.join(dirpath, t))
+        try:
+            os.lstat(abs_t)             # 存储文件还在吗
+        except OSError:
+            continue                    # 内容已经丢了，交给下面的清理
+        n = store(abs_t, abs_t)
+        os.remove(p)
+        os.symlink(os.path.relpath(n, dirpath), p)
+orphan = 0
+for dirpath, dirnames, filenames in os.walk(root):
+    for name in list(dirnames) + filenames:
+        if name.startswith(".l2s."):
+            try:
+                os.remove(os.path.join(dirpath, name)); orphan += 1
+            except OSError:
+                pass
+print(f"修正 {len(renamed)} 组，清理 {orphan} 个残留", file=sys.stderr)
+PYFIX
+  fi
+  # proot 下偶有文件被 link2symlink 弄成悬空链，tar 遇到会非 0 退出；用 --ignore-failed-read
+  # 保证包能出，但把丢掉的条目数报出来 —— 大于 0 就说明这个环境的 proot 不可信。
+  local terr; terr="$(mktemp)"
   tar --numeric-owner --owner=0 --group=0 --sort=name --mtime="@$epoch" --format=gnu \
-      -C "$root" -cf - . | "${gz[@]}" > "$out"
+      --ignore-failed-read -C "$root" -cf - . 2>"$terr" | "${gz[@]}" > "$out"
+  local lost; lost="$(grep -c "Cannot stat\|Cannot open" "$terr" 2>/dev/null || true)"
+  [ "${lost:-0}" -eq 0 ] || warn "打包时跳过 $lost 个读不到的条目（proot 的 link2symlink 丢的），见下："
+  [ "${lost:-0}" -eq 0 ] || head -5 "$terr" >&2
+  rm -f "$terr"
 }
 
 verify() { # $1=产物
@@ -265,6 +327,16 @@ build_alpine() { # $1=root
   mkdir -p "$root/etc/apk"
   printf '%s\n%s\n' "$MIRROR/$rel/main" "$MIRROR/$rel/community" > "$root/etc/apk/repositories"
   printf 'nameserver 1.1.1.1\nnameserver 223.5.5.5\n' > "$root/etc/resolv.conf"
+  # 没有 IPv6 的网络里，DNS 往往先返回 AAAA，musl 的解析器会直接把 apk 判成
+  # "DNS: transient error"（glibc 的 apt 不受影响）。把镜像的 IPv4 钉进 /etc/hosts，
+  # apk 就只会看到可达的地址。getent 不存在时跳过，不影响正常网络。
+  local mhost mip
+  mhost="${MIRROR#*://}"; mhost="${mhost%%/*}"
+  printf '127.0.0.1 localhost\n' > "$root/etc/hosts"
+  if command -v getent >/dev/null 2>&1; then
+    mip="$(getent ahostsv4 "$mhost" 2>/dev/null | awk 'NR==1{print $1}')"
+    [ -n "$mip" ] && printf '%s %s\n' "$mip" "$mhost" >> "$root/etc/hosts"
+  fi
 
   local qdst=""
   if [ "$ARCH" != "$(host_arch)" ]; then
@@ -395,7 +467,8 @@ build_one() { # $1=distro $2=arch $3=tier
     chown "$SUDO_USER": "$out" "$out.sha256" "$PWD/out" 2>/dev/null || true
   fi
 
-  [ "${KEEP:-0}" -eq 1 ] || rm -rf "$WORK"
+  # proot 下残留的自指软链会让 rm -rf 返回非 0，别让它在成功之后把整个构建判成失败
+  [ "${KEEP:-0}" -eq 1 ] || rm -rf "$WORK" 2>/dev/null || true
   echo; ok "产物 out/$name（$(du -h "$out" | cut -f1)）"
 }
 

@@ -32,17 +32,17 @@ Android 上现成的 rootfs 包通常有三个毛病：
 | Debian | 13 `trixie` | 当前 stable |
 | Ubuntu | 24.04 LTS `noble` | RikkaHub 默认下载的就是这个 |
 | Ubuntu | 26.04 LTS `resolute` | |
-| Alpine | 3.22 | 最小，musl + busybox，不是 glibc |
+| Alpine | 3.24 | 最小，musl + busybox，不是 glibc |
 
 | 档位 | 体积（arm64，约） | 里面有什么 |
 |---|---|---|
-| `min` | 4~45 MB | bash + apt/apk + ca-certificates + tzdata。能装包，别的什么都没有 |
+| `min` | 4~45 MB | 包管理器 + ca-certificates + tzdata。Debian/Ubuntu 自带 `bash`；**Alpine 的 `min` 只有 busybox `ash`，没有 bash** |
 | `base` | 55~75 MB | 加 curl / wget / git / less / vim-tiny / jq / unzip / zip / xz / procps / openssh-client / gnupg / htop / tree / bash-completion |
 | `dev` | 170~220 MB | 加 build-essential / gcc / make / python3 / pip / venv / cmake / sqlite3 / 常用 `-dev` 头文件 |
 
 `min ⊂ base ⊂ dev`，后一档包含前一档。
 
-当前实测（arm64）：Alpine 3.22 `min` **4.1 MB**、Ubuntu 24.04 `base` **59 MB**、Debian 12 `base` **70 MB**。完整清单见 [`docs/包清单.md`](docs/包清单.md)。
+当前实测（arm64）：Alpine 3.22 `min` **4.1 MB**、Ubuntu 24.04 `base` **58 MB**、Debian 12 `base` **70 MB**、Debian 13 `base` **76 MB**。完整清单见 [`docs/包清单.md`](docs/包清单.md)。
 
 ## 下载
 
@@ -53,7 +53,7 @@ Android 上现成的 rootfs 包通常有三个毛病：
 ```
 https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/debian-12/debian-12-arm64-base.tar.gz
 https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/ubuntu-24.04/ubuntu-24.04-arm64-base.tar.gz
-https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/alpine-3.22/alpine-3.22-arm64-min.tar.gz
+https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/alpine-3.24/alpine-3.24-arm64-min.tar.gz
 ```
 
 > 手机几乎都是 `arm64`。`amd64` 是给模拟器 / WSA / 桌面容器用的。

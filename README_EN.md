@@ -32,11 +32,11 @@ Five distributions × two architectures × three tiers.
 | Debian | 13 `trixie` | current stable |
 | Ubuntu | 24.04 LTS `noble` | what RikkaHub downloads by default |
 | Ubuntu | 26.04 LTS `resolute` | |
-| Alpine | 3.22 | smallest; musl + busybox, not glibc |
+| Alpine | 3.24 | smallest; musl + busybox, not glibc |
 
 | Tier | Size (arm64, approx.) | Contents |
 |---|---|---|
-| `min` | 15–25 MB | bash + apt/apk + ca-certificates + tzdata. Enough to install packages, nothing else |
+| `min` | 15–25 MB | Package manager + ca-certificates + tzdata. Debian/Ubuntu ship `bash`; **Alpine's `min` only has busybox `ash`, no bash** |
 | `base` | 45–75 MB | adds curl / wget / git / less / vim-tiny / jq / unzip / zip / xz / procps / openssh-client / gnupg / htop / tree / bash-completion |
 | `dev` | 180–260 MB | adds build-essential / gcc / make / python3 / pip / venv / cmake / sqlite3 / common `-dev` headers |
 
@@ -51,7 +51,7 @@ Each distribution gets its own release, tagged `<distro>-<version>`. Rebuilds re
 ```
 https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/debian-12/debian-12-arm64-base.tar.gz
 https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/ubuntu-24.04/ubuntu-24.04-arm64-base.tar.gz
-https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/alpine-3.22/alpine-3.22-arm64-min.tar.gz
+https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/alpine-3.24/alpine-3.24-arm64-min.tar.gz
 ```
 
 > Phones are almost always `arm64`. Use `amd64` for emulators, Windows Subsystem for Android, or desktop containers.
