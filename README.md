@@ -75,6 +75,12 @@ Android 上现成的 rootfs 包通常有三个毛病：
 | 发行版官方 rootfs 压缩包 | Arch Linux ARM、Kali NetHunter、Void | 官方直接提供，下载后校验 |
 | 官方容器镜像（`docker save` 格式） | OpenCloudOS | 展开其中的 `layer.tar` 得到根文件系统 |
 
+> AlmaLinux / openSUSE 走 LXC 镜像服务器，国内下载经常只有十几 KB/s。可以换成清华镜像（同步的是同一份，路径完全相同）：
+> ```bash
+> sudo ./build.sh almalinux-9 arm64 base --lxc-mirror https://mirrors.tuna.tsinghua.edu.cn/lxc-images/images
+> ```
+> 镜像站同步比官方慢，最新一两天的日期目录可能「目录在、`rootfs.tar.xz` 还没到」，脚本会自动往前退到第一个完整的日期。
+
 后三类不是我们自己 bootstrap 的，是取官方产物再统一做 proot 适配 —— 重写 `/etc/resolv.conf` 为普通文件、补 `/etc/hosts` 与 `/etc/hostname`、设定 locale、按档位补装常用工具、清缓存、裁剪文档。这样既省构建时间，也少一层「我装的和你官方的不一样」的疑虑。
 
 ## 下载

@@ -75,6 +75,12 @@ Eleven distributions × up to two architectures × three tiers.
 | Distribution-provided rootfs tarballs | Arch Linux ARM, Kali NetHunter, Void | official artifacts, verified on download |
 | Official container image (`docker save` format) | OpenCloudOS | the inner `layer.tar` is the root filesystem |
 
+> AlmaLinux / openSUSE come from the LXC image server, which is often limited to tens of KB/s from mainland China. Switch to the Tsinghua mirror (same files, identical paths):
+> ```bash
+> sudo ./build.sh almalinux-9 arm64 base --lxc-mirror https://mirrors.tuna.tsinghua.edu.cn/lxc-images/images
+> ```
+> The mirror lags upstream by a day or two, so the newest date directories may still be empty — the script falls back to the first date that actually has `rootfs.tar.xz`.
+
 The last three are not bootstrapped here — an official artifact is taken and then adapted for proot uniformly: rewrite `/etc/resolv.conf` as a regular file, fill in `/etc/hosts` and `/etc/hostname`, set the locale, install the tier's extra tools, clear caches and trim docs. That saves build time and removes the "what I installed is not what upstream shipped" doubt.
 
 ## Download

@@ -15,6 +15,10 @@
 #       sudo ./build.sh void amd64 dev
 #       sudo ./build.sh ubuntu-24.04 amd64 base --mirror http://mirrors.tuna.tsinghua.edu.cn/ubuntu
 #
+#   LXC 源（almalinux-9 / opensuse-tumbleweed）默认用官方 images.linuxcontainers.org。
+#   国内下载慢就换清华镜像（同步的是同一份，路径完全相同）：
+#       --lxc-mirror https://mirrors.tuna.tsinghua.edu.cn/lxc-images/images
+#
 #   全部跑一遍：sudo ./build.sh all          （见文件末尾的矩阵定义）
 #   只跑新增的几个：sudo ./build.sh new-all
 #
@@ -24,7 +28,9 @@ set -euo pipefail
 # FAMILY = 怎么把根文件系统弄出来：deb | alpine | lxc | tarball | dockersave
 # PM     = 装包用哪个包管理器：apt | apk | dnf | zypper | pacman | xbps
 declare -A D_NAME D_VERSION D_RELEASE D_FAMILY D_MIRROR D_COMPONENTS D_KEYRING D_PM D_ARCHES
-# LXC 源（images.linuxcontainers.org）
+# LXC 源。默认官方；国内慢可用 --lxc-mirror 换清华（同步的是同一份，路径完全相同）：
+#   https://mirrors.tuna.tsinghua.edu.cn/lxc-images/images
+LXC_BASE="https://images.linuxcontainers.org/images"
 declare -A D_LXC_PROJECT D_LXC_VERSION
 
 DISTROS=(debian-12 debian-13 ubuntu-24.04 ubuntu-26.04 alpine-3.24)
@@ -226,24 +232,43 @@ fetch_cached() { # $1=url $2=缓存文件名
 }
 
 # ---------------------------------------------------------------- 各来源的取包
-# 1) LXC 官方镜像服务器：每天一个新目录，得先抓目录列表取最新那个
-lxc_pick_date() { # $1=project $2=version $3=lxcarch
-  local base="https://images.linuxcontainers.org/images/$1/$2/$3/default/"
-  fetch_text "$base" \
+# 1) LXC 镜像服务器（官方 / 清华镜像，路径完全相同）：每天一个新目录
+#    镜像站同步比官方慢，最新的几个目录常常「目录在、rootfs.tar.xz 还没到」，
+#    所以从新到旧挨个探，取第一个完整的。
+lxc_dates() { # $1=project $2=version $3=lxcarch —— 输出全部日期，新的在前
+  { fetch_text "$LXC_BASE/$1/$2/$3/default/" || true; } \
     | grep -oE 'href="[0-9]{8}_[0-9]{2}(%3A|:)[0-9]{2}/"' \
     | sed 's/^href="//; s|/"$||; s|/$||' \
-    | sort | tail -1
+    | sort -r
+}
+
+lxc_probe() { # $1=url —— 只探是否存在，不下整个文件
+  command -v curl >/dev/null 2>&1 || return 0
+  curl -fsS --http1.1 --connect-timeout 15 --max-time 30 -r 0-0 \
+       -A 'android-proot-rootfs/1.0' -o /dev/null "$1" 2>/dev/null \
+  || curl -fsSI --http1.1 --connect-timeout 15 --max-time 30 \
+       -A 'android-proot-rootfs/1.0' "$1" >/dev/null 2>&1
 }
 
 lxc_rootfs() { # $1=out
-  local out="$1" proj ver lac d base want have name
+  local out="$1" proj ver lac d base want have name rest cand
   proj="${D_LXC_PROJECT[$DISTRO]}"; ver="${D_LXC_VERSION[$DISTRO]}"
   lac="$(arch_lxc "$ARCH")"
-  d="$(lxc_pick_date "$proj" "$ver" "$lac")"
-  [ -n "$d" ] || die "取不到 $proj/$ver/$lac 的镜像日期目录（网络？站点改版？）"
+  rest="$(lxc_dates "$proj" "$ver" "$lac" | head -6)"
+  [ -n "$rest" ] || die "取不到 $proj/$ver/$lac 的镜像日期目录（网络？站点改版？）"
+
+  d=""; base=""
+  for cand in $rest; do
+    if lxc_probe "$LXC_BASE/$proj/$ver/$lac/default/$cand/rootfs.tar.xz"; then
+      d="$cand"; base="$LXC_BASE/$proj/$ver/$lac/default/$cand"; break
+    fi
+    warn "$proj/$ver/$lac @ $cand 还没同步完（rootfs.tar.xz 404），往前退一天"
+  done
+  [ -n "$d" ] || die "$proj/$ver/$lac 最近 6 个日期目录都没有 rootfs.tar.xz
+  镜像站同步有延迟，过几小时再跑；或换源试试 --lxc-mirror"
+
   VER="$ver-$(echo "$d" | sed 's/%3A/:/')"
-  base="https://images.linuxcontainers.org/images/$proj/$ver/$lac/default/$d"
-  log "LXC 镜像 $proj/$ver/$lac @ $d"
+  log "LXC 镜像 $proj/$ver/$lac @ $d（源 $LXC_BASE）"
 
   name="lxc-$proj-$ver-$lac-$d.tar.xz"
   fetch_cached "$base/rootfs.tar.xz" "$name"
@@ -837,16 +862,17 @@ MIRROR_ARG=""; KEEP=0; TARGETS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --mirror) MIRROR_ARG="$2"; shift 2 ;;
+    --lxc-mirror) LXC_BASE="${2%/}"; shift 2 ;;
     --keep)   KEEP=1; shift ;;
     all)      TARGETS=("${DISTROS[@]}" "${NEW_DISTROS[@]}"); shift ;;
     all-new|new-all) TARGETS=("${NEW_DISTROS[@]}"); shift ;;
-    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) TARGETS+=("$1"); shift ;;
   esac
 done
 
 if [ ${#TARGETS[@]} -eq 0 ]; then
-  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1
+  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 1
 fi
 
 if [ ${#TARGETS[@]} -ge 3 ] && [ -n "${D_NAME[${TARGETS[0]}]:-}" ]; then
