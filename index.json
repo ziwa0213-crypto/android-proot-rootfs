@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repo": "ziwa0213-crypto/android-proot-rootfs",
   "release": null,
-  "generatedAt": "2026-11-02T08:51:41Z",
+  "generatedAt": "2026-11-02T09:07:06Z",
   "packages": [
     {
       "name": "almalinux-9-arm64-base.tar.gz",
@@ -53,6 +53,16 @@
       "size": 79199242,
       "sha256": "24c2cf6c6a6566f9e8292f4a8f06c4d3b07030b63afd1c98328fb10ce59e8f81",
       "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/debian-13/debian-13-arm64-base.tar.gz"
+    },
+    {
+      "name": "opencloudos-9-arm64-base.tar.gz",
+      "distro": "opencloudos",
+      "version": "9",
+      "arch": "arm64",
+      "tier": "base",
+      "size": 90922896,
+      "sha256": "ae033df3ce22cb92aa905f8db36984174ad85e60383e271e55ca1150cdd7fc43",
+      "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/opencloudos-9/opencloudos-9-arm64-base.tar.gz"
     },
     {
       "name": "ubuntu-24.04-arm64-base.tar.gz",
