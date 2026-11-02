@@ -431,9 +431,43 @@ install_pkgs() { # $1=root $2=pm $3=tier
       retry3 chroot "$root" /sbin/apk add --no-cache $pkgs || die "apk add 失败"
       ;;
     dnf)
-      retry3 chroot "$root" /usr/bin/env HOME=/root \
-        /usr/bin/dnf -y --setopt=install_weak_deps=False install $pkgs \
-        || die "dnf 装包失败"
+      # RHEL 系各家的仓库组合不一样：AlmaLinux 9 的 BaseOS/AppStream/Extras 里就没有 htop
+      # （htop 由 EPEL 提供）。一次传全部包名时，只要有一个 "No match for argument"，
+      # 整个 dnf 事务就失败回滚 —— wget / git / jq 这些本来能装的也一个都装不上。
+      # 所以失败后把报错点名的包剔掉重来，最多 3 轮；剔完还失败就是真错误。
+      local logf="$CACHE/.dnf-$DISTRO-$ARCH.log" want keep p round=0 dropped=""
+      mkdir -p "$CACHE"
+      while :; do
+        round=$((round + 1))
+        if chroot "$root" /usr/bin/env HOME=/root LC_ALL=C \
+             /usr/bin/dnf -y --setopt=install_weak_deps=False install $want \
+             >"$logf" 2>&1; then
+          ok "装包完成"; break
+        fi
+        keep=""
+        for p in $want; do
+          if grep -qxF "No match for argument: $p" "$logf"; then dropped="$dropped $p"
+          else keep="$keep $p"; fi
+        done
+        if [ "$keep" = "$want" ]; then
+          # 不是包名不存在，多半是网络抖动，原样重试
+          warn "失败原因不是包名不存在，重试一次"
+          retry3 chroot "$root" /usr/bin/env HOME=/root LC_ALL=C \
+            /usr/bin/dnf -y --setopt=install_weak_deps=False install $want \
+            || { sed -n '/^Error/,+3p' "$logf" >&2 || true; die "dnf 装包失败"; }
+          ok "装包完成"; break
+        fi
+        if [ "$round" -ge 3 ]; then
+          sed -n '/^Error/,+3p' "$logf" >&2 || true
+          die "dnf 装包失败（已剔除 3 轮仍失败）"
+        fi
+        warn "$DISTRO 的仓库里没有：$(echo $dropped | sed 's/^ //')，剔除后重试"
+        want="$keep"
+        if [ -z "$want" ]; then ok "清单里的包这个发行版都没有，跳过装包"; break; fi
+      done
+      if [ -n "$dropped" ]; then
+        warn "最终没有装的包（该发行版仓库未提供）：$(echo $dropped | sed 's/^ //')"
+      fi
       ;;
     zypper)
       # Tumbleweed 是滚动版，zypper 会顺带升级依赖，这是它的正常行为。
