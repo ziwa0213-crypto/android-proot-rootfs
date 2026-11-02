@@ -19,6 +19,11 @@
 #   国内下载慢就换清华镜像（同步的是同一份，路径完全相同）：
 #       --lxc-mirror https://mirrors.tuna.tsinghua.edu.cn/lxc-images/images
 #
+#   tarball 源（void / archlinux）同理，--tarball-mirror 传「镜像站上这个发行版的根目录」：
+#       --tarball-mirror https://mirrors.tuna.tsinghua.edu.cn/voidlinux
+#       --tarball-mirror https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm
+#   （kalinethunter 走 kali.download，清华没有这个目录，只能用官方）
+#
 #   全部跑一遍：sudo ./build.sh all          （见文件末尾的矩阵定义）
 #   只跑新增的几个：sudo ./build.sh new-all
 #
@@ -31,6 +36,14 @@ declare -A D_NAME D_VERSION D_RELEASE D_FAMILY D_MIRROR D_COMPONENTS D_KEYRING D
 # LXC 源。默认官方；国内慢可用 --lxc-mirror 换清华（同步的是同一份，路径完全相同）：
 #   https://mirrors.tuna.tsinghua.edu.cn/lxc-images/images
 LXC_BASE="https://images.linuxcontainers.org/images"
+# tarball 类发行版的取包根。--tarball-mirror 整段替换成镜像站上的同名目录
+# （镜像保持与官方一致的路径结构，所以只换根、后面的相对路径不动）：
+#   void        https://mirrors.tuna.tsinghua.edu.cn/voidlinux
+#   archlinux   https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm
+VOID_BASE="https://repo-default.voidlinux.org"
+ARCH_BASE="http://os.archlinuxarm.org"
+KALI_BASE="https://kali.download"
+TARBALL_MIRROR=""
 declare -A D_LXC_PROJECT D_LXC_VERSION
 
 DISTROS=(debian-12 debian-13 ubuntu-24.04 ubuntu-26.04 alpine-3.24)
@@ -290,26 +303,28 @@ lxc_rootfs() { # $1=out
 
 # 2) 官方直接给的 rootfs 压缩包
 tarball_url() { # $1=arch  → 输出 url
+  # 取包根：--tarball-mirror 给了就用它，否则用该发行版的官方根
   case "$DISTRO" in
     archlinux)
       case "$1" in
-        arm64) echo "http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz" ;;
+        arm64) echo "${TARBALL_MIRROR:-$ARCH_BASE}/os/ArchLinuxARM-aarch64-latest.tar.gz" ;;
         *) die "Arch 只有 arm64（x86 版是 .tar.zst，应用不认）" ;;
       esac ;;
     kalinethunter)
       # minimal 比 nano 小（120MB vs 170MB），full 是 1.7GB 的大全
       case "$1" in
-        arm64) echo "https://kali.download/nethunter-images/current/rootfs/kali-nethunter-rootfs-minimal-arm64.tar.xz" ;;
-        amd64) echo "https://kali.download/nethunter-images/current/rootfs/kali-nethunter-rootfs-minimal-amd64.tar.xz" ;;
+        arm64) echo "${TARBALL_MIRROR:-$KALI_BASE}/nethunter-images/current/rootfs/kali-nethunter-rootfs-minimal-arm64.tar.xz" ;;
+        amd64) echo "${TARBALL_MIRROR:-$KALI_BASE}/nethunter-images/current/rootfs/kali-nethunter-rootfs-minimal-amd64.tar.xz" ;;
       esac ;;
     void)
-      local a name
+      local a name base
+      base="${TARBALL_MIRROR:-$VOID_BASE}"; base="${base%/}"
       case "$1" in arm64) a=aarch64 ;; amd64) a=x86_64 ;; esac
       # 只取 glibc 版：musl 版能装，但 pip 装包时 wheel 覆盖率差很多
-      name="$(fetch_text "https://repo-default.voidlinux.org/live/current/" \
+      name="$(fetch_text "$base/live/current/" \
               | grep -oE "void-$a-ROOTFS-[0-9]{8}\.tar\.xz" | sort -u | tail -1)"
-      [ -n "$name" ] || die "取不到 Void $a 的 ROOTFS 文件名"
-      echo "https://repo-default.voidlinux.org/live/current/$name" ;;
+      [ -n "$name" ] || die "取不到 Void $a 的 ROOTFS 文件名（源 $base/live/current/）"
+      echo "$base/live/current/$name" ;;
   esac
 }
 
@@ -792,6 +807,9 @@ build_deb() { # $1=root
 build_one() { # $1=distro $2=arch $3=tier
   DISTRO="$1"; ARCH="$2"; TIER="$3"
   [ -n "${D_NAME[$DISTRO]:-}" ] || die "没有这个发行版: $DISTRO"
+  if [ -n "$TARBALL_MIRROR" ] && [ "${D_FAMILY[$DISTRO]}" != tarball ]; then
+    warn "--tarball-mirror 对 $DISTRO 不生效（它不是 tarball 取包，用 --lxc-mirror 或 --mirror）"
+  fi
   VER="${D_VERSION[$DISTRO]}"; RELEASE="${D_RELEASE[$DISTRO]:-}"
   FAMILY="${D_FAMILY[$DISTRO]}"; PM="${D_PM[$DISTRO]}"
   COMPONENTS="${D_COMPONENTS[$DISTRO]:-}"
@@ -901,16 +919,17 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --mirror) MIRROR_ARG="$2"; shift 2 ;;
     --lxc-mirror) LXC_BASE="${2%/}"; shift 2 ;;
+    --tarball-mirror) TARBALL_MIRROR="${2%/}"; shift 2 ;;
     --keep)   KEEP=1; shift ;;
     all)      TARGETS=("${DISTROS[@]}" "${NEW_DISTROS[@]}"); shift ;;
     all-new|new-all) TARGETS=("${NEW_DISTROS[@]}"); shift ;;
-    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) TARGETS+=("$1"); shift ;;
   esac
 done
 
 if [ ${#TARGETS[@]} -eq 0 ]; then
-  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 1
+  sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 1
 fi
 
 if [ ${#TARGETS[@]} -ge 3 ] && [ -n "${D_NAME[${TARGETS[0]}]:-}" ]; then
