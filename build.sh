@@ -222,7 +222,10 @@ fetch_text() { # $1=url
 
 # 带缓存的下载：同一个 rootfs 在 min/base/dev 三档之间只下一次
 fetch_cached() { # $1=url $2=缓存文件名
-  local url="$1" name="$2" dst="$CACHE/$name"
+  local url="$1" name="$2"
+  # 必须分两条 local 写：同一条 local 里的 $name 在展开时还看不到这条语句刚声明的 name，
+  # 会按 bash 的动态作用域去取值 —— 调用者刚好没设 name 时 set -u 就报「未绑定变量」
+  local dst="$CACHE/$name"
   mkdir -p "$CACHE"
   if [ -s "$dst" ]; then ok "用缓存 $name（$(du -h "$dst" | cut -f1)）"; return 0; fi
   log "下载 $name"
@@ -325,7 +328,7 @@ tarball_rootfs() { # $1=out
 
 # 3) docker save 格式（opencloudos）：外层是 OCI/docker 打包，里面 */layer.tar 才是 rootfs
 dockersave_rootfs() { # $1=out
-  local out="$1" a base d f name tmp layer want have
+  local out="$1" a base d f tmp layer want have
   case "$ARCH" in arm64) a=aarch64 ;; amd64) a=x86_64 ;; esac
   base="https://mirrors.opencloudos.tech/opencloudos/$D_VERSION_MAJOR/images/docker/$a"
 
