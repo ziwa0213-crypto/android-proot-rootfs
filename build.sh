@@ -515,6 +515,29 @@ install_pkgs() { # $1=root $2=pm $3=tier
       fi
       ;;
     xbps)
+      # Void 的 rootfs 是某个时间点的快照，自带的 xbps 常比仓库里的旧。
+      # 旧的 xbps 会拒装任何包，只丢一句 "The 'xbps' package must be updated"，
+      # 所以先让它自我更新一次（-S 同步索引 / -u 更新 / -y 免确认）。
+      # 另外换过 --tarball-mirror 的话，包仓库也改成同一台镜像：
+      # 否则 rootfs 从清华下、装包又跑回官方源，等于没换。
+      if [ -n "$TARBALL_MIRROR" ]; then
+        local rc n=0
+        for rc in "$root"/usr/share/xbps.d/*.conf "$root"/etc/xbps.d/*.conf; do
+          [ -f "$rc" ] || continue
+          if grep -q 'repo-default\.voidlinux\.org' "$rc"; then
+            sed -i "s#https\?://repo-default\.voidlinux\.org#${TARBALL_MIRROR}#g" "$rc"
+            n=$((n + 1))
+          fi
+        done
+        if [ "$n" -gt 0 ]; then
+          ok "xbps 仓库已指向 $TARBALL_MIRROR（改了 $n 个配置）"
+        else
+          warn "没找到写死 repo-default.voidlinux.org 的 xbps 配置，仓库保持原样"
+        fi
+      fi
+      # 自我更新失败不当作致命：少数情况下旧 xbps 依然能装，让它继续试
+      retry3 chroot "$root" /usr/bin/env HOME=/root /usr/bin/xbps-install -S -u -y xbps \
+        || warn "xbps 自我更新失败，仍尝试装包"
       retry3 chroot "$root" /usr/bin/env HOME=/root /usr/bin/xbps-install -S -y $pkgs \
         || die "xbps 装包失败"
       ;;
