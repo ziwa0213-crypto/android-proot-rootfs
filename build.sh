@@ -179,13 +179,23 @@ ensure_qemu_static() {
 fetch() { # $1=url $2=输出文件
   local url="$1" out="$2"
   if command -v curl >/dev/null 2>&1; then
-    # --retry-all-errors 不能省：镜像常在传输中途掐连接，curl 默认不重试
+    # --retry-all-errors 不能省：镜像常在传输中途掐连接，curl 默认不重试。
+    # --speed-limit/--speed-time 也不能省：国内访问 dl-cdn.alpinelinux.org 这类源时，
+    # 经常「连接建立成功、握手完成、然后每秒只有几 KB」，--connect-timeout 管不到这种，
+    # 脚本就会无声无息地挂在那里。这里定成「连续 30 秒低于 1 KB/s 就放弃」，
+    # 交给 --retry-all-errors 重试，重试完还不行就报错退出，不会一直吊着。
+    # 1 KB/s 的阈值足够低，正常下载（哪怕几十 KB/s）不会被误杀。
     curl -fsSL --http1.1 --retry 5 --retry-all-errors --retry-delay 2 \
-         --connect-timeout 20 -A 'android-proot-rootfs/1.0' -o "$out" "$url" && return 0
-    warn "curl 失败，改用 python3 重试"
+         --connect-timeout 20 --speed-limit 1024 --speed-time 30 \
+         -A 'android-proot-rootfs/1.0' -o "$out" "$url" && return 0
+    warn "curl 失败（网络中断或速度过低），改用 python3 重试"
   fi
-  command -v python3 >/dev/null 2>&1 || die "下载失败：$url"
-  python3 - "$url" "$out" <<'PY'
+  command -v python3 >/dev/null 2>&1 || die "下载失败：$url
+  网络不通时试试 --mirror 换国内源，例如：
+    Alpine  --mirror https://mirrors.tuna.tsinghua.edu.cn/alpine
+    Ubuntu  --mirror http://mirrors.tuna.tsinghua.edu.cn/ubuntu"
+  # python 的 urlopen(timeout=) 只管单次读写，管不住「慢速但不断」，外面再套一层 timeout
+  timeout 900 python3 - "$url" "$out" <<'PY'
 import sys, urllib.request
 url, out = sys.argv[1], sys.argv[2]
 req = urllib.request.Request(url, headers={"User-Agent": "android-proot-rootfs/1.0"})
