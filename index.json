@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "repo": "ziwa0213-crypto/android-proot-rootfs",
+  "release": null,
+  "generatedAt": "2026-11-02T06:49:49Z",
+  "packages": [
+    {
+      "name": "alpine-3.22-arm64-min.tar.gz",
+      "distro": "alpine",
+      "version": "3.22",
+      "arch": "arm64",
+      "tier": "min",
+      "size": 4271927,
+      "sha256": "9140592fd411bd566abfd9fb6de3012edce4fdd7a34c19acb1501e8d5ff73b49",
+      "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/alpine-3.22/alpine-3.22-arm64-min.tar.gz"
+    },
+    {
+      "name": "debian-12-arm64-base.tar.gz",
+      "distro": "debian",
+      "version": "12",
+      "arch": "arm64",
+      "tier": "base",
+      "size": 73384807,
+      "sha256": "dd4450e5057104c437e0469ccb3f5f549da40588373fe9f0a24016d425017492",
+      "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/debian-12/debian-12-arm64-base.tar.gz"
+    },
+    {
+      "name": "ubuntu-24.04-arm64-base.tar.gz",
+      "distro": "ubuntu",
+      "version": "24.04",
+      "arch": "arm64",
+      "tier": "base",
+      "size": 61057009,
+      "sha256": "6f9461b267263ddebe2d7acbc299d1006f7ad8a0301d53b714f3b25637bd248d",
+      "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/ubuntu-24.04/ubuntu-24.04-arm64-base.tar.gz"
+    },
+    {
+      "name": "ubuntu-26.04-arm64-base.tar.gz",
+      "distro": "ubuntu",
+      "version": "26.04",
+      "arch": "arm64",
+      "tier": "base",
+      "size": 70950629,
+      "sha256": "3675cb41e79e53a42cb2dba8cab0c63f70b4f994806af213780329a4e0122940",
+      "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/ubuntu-26.04/ubuntu-26.04-arm64-base.tar.gz"
+    }
+  ]
+}
