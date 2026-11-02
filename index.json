@@ -2,8 +2,18 @@
   "schemaVersion": 1,
   "repo": "ziwa0213-crypto/android-proot-rootfs",
   "release": null,
-  "generatedAt": "2026-11-02T07:49:44Z",
+  "generatedAt": "2026-11-02T08:51:41Z",
   "packages": [
+    {
+      "name": "almalinux-9-arm64-base.tar.gz",
+      "distro": "almalinux",
+      "version": "9",
+      "arch": "arm64",
+      "tier": "base",
+      "size": 179267226,
+      "sha256": "38dcea1f4910a10783a74662227d7c564dc9ff8066c44d0c72a213d0371885b3",
+      "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/almalinux-9/almalinux-9-arm64-base.tar.gz"
+    },
     {
       "name": "alpine-3.22-arm64-min.tar.gz",
       "distro": "alpine",
