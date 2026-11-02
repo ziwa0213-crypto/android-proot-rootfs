@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repo": "ziwa0213-crypto/android-proot-rootfs",
   "release": null,
-  "generatedAt": "2026-11-02T07:37:29Z",
+  "generatedAt": "2026-11-02T07:49:44Z",
   "packages": [
     {
       "name": "alpine-3.22-arm64-min.tar.gz",
@@ -40,7 +40,7 @@
       "version": "13",
       "arch": "arm64",
       "tier": "base",
-      "size": 3471229,
+      "size": 79199242,
       "sha256": "24c2cf6c6a6566f9e8292f4a8f06c4d3b07030b63afd1c98328fb10ce59e8f81",
       "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/debian-13/debian-13-arm64-base.tar.gz"
     },
