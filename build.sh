@@ -575,15 +575,85 @@ install_pkgs() { # $1=root $2=pm $3=tier
       fi
       ;;
     pacman)
-      # Arch 的 rootfs 是某个时间点的快照，keyring 可能已经过期
+      # Arch 的 rootfs 是某个时间点的快照，keyring 可能已经过期，所以装包前先 -Sy。
+      #
+      # 但 2024 年之后的 pacman（7.0+）还有第二道坎：下载默认在沙箱里跑 ——
+      # 切到 alpm 用户、用 Landlock 把它限制成只能写 cachedir。我们的构建环境是
+      # chroot（可能还套 proot / qemu），于是：
+      #   error: restricting filesystem access failed because Landlock is not supported by the kernel!
+      #   error: switching to sandbox user 'alpm' failed!
+      #   error: could not determine cachedir mount point /var/cache/pacman/pkg/download-XXXX
+      #   error: failed to commit transaction (not enough free disk space)
+      # 后两条是前两条的连带（它算不出缓存目录挂在哪，就归类成空间不足），
+      # 并不是真的没空间。直接关掉沙箱即可，顺手把 CheckSpace 也关掉。
+      #
+      # DisableSandbox 是 pacman 7.0 才有的选项，老版本写了会报
+      # "directive 'DisableSandbox' in section 'options' not recognized" 然后直接退出，
+      # 所以写完用 pacman-conf 验一遍（它就是 pacman.conf 的解析器），解析不过就撤掉。
+      chroot "$root" /usr/bin/env HOME=/root /bin/sh -c '
+        conf=/etc/pacman.conf
+        [ -f "$conf" ] || exit 0
+        # 官方 pacman.conf 里它是注释掉的一行（#DisableSandbox），先试着取消注释；
+        # 没有这行（ArchLinuxARM 的模板可能更老）就在 [options] 下补一行。
+        if grep -qE "^#?DisableSandbox" "$conf"; then
+          sed -i "s/^#*DisableSandbox.*/DisableSandbox/" "$conf"
+        else
+          sed -i "/^\[options\]/a DisableSandbox" "$conf"
+        fi
+        sed -i "s/^CheckSpace/#CheckSpace/" "$conf"
+        # 万一这个 pacman 还不认识 DisableSandbox（7.0 以前），写了会让它直接退出，
+        # 所以用 pacman-conf（pacman.conf 的解析器）验一遍，解析不过就撤掉。
+        if [ -x /usr/bin/pacman-conf ] && ! /usr/bin/pacman-conf >/dev/null 2>&1; then
+          sed -i "/^DisableSandbox/d" "$conf"
+          echo "warn: 这个 pacman 不认识 DisableSandbox，已撤回" >&2
+        fi
+      ' || warn "改 pacman.conf 失败，按原样继续"
+
       chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman -Sy --noconfirm || true
-      if ! retry3 chroot "$root" /usr/bin/env HOME=/root \
-             /usr/bin/pacman -S --needed --noconfirm $pkgs; then
-        warn "pacman 失败，重建 keyring 后重试"
-        chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman-key --init || true
-        chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman-key --populate archlinuxarm || true
-        chroot "$root" /usr/bin/env HOME=/root \
-          /usr/bin/pacman -S --needed --noconfirm $pkgs || die "pacman 装包失败"
+
+      # 和 dnf / zypper 一样：仓库里没有的包会让 pacman 整批中止
+      # （error: target not found: xxx），其余包一个都不装。失败后把点名的包剔掉重来。
+      local logf="$CACHE/.pacman-$DISTRO-$ARCH.log" want="$pkgs" keep="" p round=0 dropped="" keyring=0
+      mkdir -p "$CACHE"
+      while :; do
+        round=$((round + 1))
+        if chroot "$root" /usr/bin/env HOME=/root LC_ALL=C \
+             /usr/bin/pacman -S --needed --noconfirm $want 2>&1 | tee "$logf"; then
+          break
+        fi
+        # keyring 过期 / 未初始化是「一次性」问题，重建后重试，不占剔除轮次
+        if [ "$keyring" -eq 0 ] && grep -qE "invalid or corrupted package|unknown trust|could not be looked up|PGP signature.*invalid" "$logf"; then
+          keyring=1
+          round=$((round - 1))
+          warn "keyring 不可信，重建后重试"
+          chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman-key --init || true
+          chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman-key --populate archlinuxarm || true
+          chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman -Sy --noconfirm || true
+          continue
+        fi
+        keep=""
+        for p in $want; do
+          if grep -qxF "error: target not found: $p" "$logf"; then dropped="$dropped $p"
+          else keep="$keep $p"; fi
+        done
+        if [ "$(echo $keep)" = "$want" ]; then   # keep 拼接带前导空格，必须规范化后比
+          # 不是包名不存在，多半是网络抖动，原样重试一次
+          warn "失败原因不是包名不存在，重试一次"
+          chroot "$root" /usr/bin/env HOME=/root LC_ALL=C \
+            /usr/bin/pacman -S --needed --noconfirm $want \
+            || { sed -n '/^error/p' "$logf" | head -5 >&2 || true; die "pacman 装包失败"; }
+          break
+        fi
+        if [ "$round" -ge 3 ]; then
+          sed -n '/^error/p' "$logf" | head -5 >&2 || true
+          die "pacman 装包失败（已剔除 3 轮仍失败）"
+        fi
+        warn "$DISTRO 的仓库里没有：$(echo $dropped | sed 's/^ //')，剔除后重试"
+        want="$keep"
+        if [ -z "$want" ]; then warn "清单里的包这个发行版都没有"; break; fi
+      done
+      if [ -n "$dropped" ]; then
+        warn "最终没有装的包（该发行版仓库未提供）：$(echo $dropped | sed 's/^ //')"
       fi
       ;;
     xbps)
