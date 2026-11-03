@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repo": "ziwa0213-crypto/android-proot-rootfs",
   "release": null,
-  "generatedAt": "2026-11-03T03:54:32Z",
+  "generatedAt": "2026-11-03T04:36:49Z",
   "packages": [
     {
       "name": "almalinux-9-arm64-base.tar.gz",
@@ -63,6 +63,16 @@
       "size": 90922896,
       "sha256": "ae033df3ce22cb92aa905f8db36984174ad85e60383e271e55ca1150cdd7fc43",
       "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/opencloudos-9/opencloudos-9-arm64-base.tar.gz"
+    },
+    {
+      "name": "opensuse-tumbleweed-arm64-base.tar.gz",
+      "distro": "opensuse",
+      "version": "tumbleweed",
+      "arch": "arm64",
+      "tier": "base",
+      "size": 115344706,
+      "sha256": "16028a83cf223b321e2287e8cf3b4ba81aad8a5fb2b4d6c1dafd1a2270b8d179",
+      "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/opensuse-tumbleweed/opensuse-tumbleweed-arm64-base.tar.gz"
     },
     {
       "name": "ubuntu-24.04-arm64-base.tar.gz",
