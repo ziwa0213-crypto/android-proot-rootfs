@@ -593,13 +593,14 @@ install_pkgs() { # $1=root $2=pm $3=tier
       chroot "$root" /usr/bin/env HOME=/root /bin/sh -c '
         conf=/etc/pacman.conf
         [ -f "$conf" ] || exit 0
-        # 官方 pacman.conf 里它是注释掉的一行（#DisableSandbox），先试着取消注释；
-        # 没有这行（ArchLinuxARM 的模板可能更老）就在 [options] 下补一行。
-        if grep -qE "^#?DisableSandbox" "$conf"; then
-          sed -i "s/^#*DisableSandbox.*/DisableSandbox/" "$conf"
-        else
-          sed -i "/^\[options\]/a DisableSandbox" "$conf"
-        fi
+        # pacman 7.1 把 DisableSandbox 拆成了 DisableSandboxFilesystem /
+        # DisableSandboxSyscalls 两个细项，7.0 则只有 DisableSandbox。
+        # 不能只「取消注释」：7.1 的模板里根本没有 #DisableSandbox 这一行，
+        # 而且 s/^#*DisableSandbox.*/DisableSandbox/ 里的 .* 会把两个细项的后缀
+        # 一起吃掉，写出两行一模一样的 DisableSandbox（功能等价，但脏）。
+        # 所以先清掉所有同前缀行，再在 [options] 后面统一写一行。
+        sed -i '/^#\?DisableSandbox/d' "$conf"
+        sed -i "/^\[options\]/a DisableSandbox" "$conf"
         sed -i "s/^CheckSpace/#CheckSpace/" "$conf"
         # 万一这个 pacman 还不认识 DisableSandbox（7.0 以前），写了会让它直接退出，
         # 所以用 pacman-conf（pacman.conf 的解析器）验一遍，解析不过就撤掉。
@@ -619,7 +620,9 @@ install_pkgs() { # $1=root $2=pm $3=tier
       chroot "$root" /usr/bin/env HOME=/root /bin/sh -c '
         d=/etc/pacman.d/gnupg
         mkdir -p "$d" && chmod 755 "$d"
-        if [ ! -s "$d/pubring.kbx" ]; then
+        # gpg 2.1+ 用 pubring.kbx，但实际生成看 gnupg 版本和迁移状态，
+        # 这台机器上出来的就是老式的 pubring.gpg —— 两个都看一眼，别重复 init。
+        if [ ! -s "$d/pubring.kbx" ] && [ ! -s "$d/pubring.gpg" ]; then
           /usr/bin/pacman-key --init
         fi
         /usr/bin/pacman-key --populate archlinuxarm
