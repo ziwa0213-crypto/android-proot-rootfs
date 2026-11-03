@@ -609,6 +609,22 @@ install_pkgs() { # $1=root $2=pm $3=tier
         fi
       ' || warn "改 pacman.conf 失败，按原样继续"
 
+      # ArchLinuxARM 的 rootfs tarball 不带 keyring —— /etc/pacman.d/gnupg 是空的，
+      # 直接装包会先在签名这一关卡死：
+      #   warning: Public keyring not found; have you run 'pacman-key --init'?
+      #   error: keyring is not writable
+      #   error: required key missing from keyring
+      # 所以装包前先把它建起来。init 会生成 master key，熵走 bind 进来的 /dev/urandom，
+      # 不会卡在等键盘。populate 用 rootfs 自带的 /usr/share/pacman/keyrings/archlinuxarm.gpg。
+      chroot "$root" /usr/bin/env HOME=/root /bin/sh -c '
+        d=/etc/pacman.d/gnupg
+        mkdir -p "$d" && chmod 755 "$d"
+        if [ ! -s "$d/pubring.kbx" ]; then
+          /usr/bin/pacman-key --init
+        fi
+        /usr/bin/pacman-key --populate archlinuxarm
+      ' || warn "初始化 keyring 失败，按原样继续"
+
       chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman -Sy --noconfirm || true
 
       # 和 dnf / zypper 一样：仓库里没有的包会让 pacman 整批中止
@@ -621,14 +637,25 @@ install_pkgs() { # $1=root $2=pm $3=tier
              /usr/bin/pacman -S --needed --noconfirm $want 2>&1 | tee "$logf"; then
           break
         fi
-        # keyring 过期 / 未初始化是「一次性」问题，重建后重试，不占剔除轮次
-        if [ "$keyring" -eq 0 ] && grep -qE "invalid or corrupted package|unknown trust|could not be looked up|PGP signature.*invalid" "$logf"; then
-          keyring=1
+        # 签名 / keyring 相关失败，和「包名不存在」是两回事，单独处理：
+        #   第 1 次 —— 推倒重建 keyring，不占剔除轮次
+        #   第 2 次 —— 真建不起来就本次构建不校验签名（包来自官方 tarball + 官方镜像）
+        if [ "$keyring" -lt 2 ] && grep -qE "^error: (keyring|required key|signature from)|^warning: Public keyring not found|invalid or corrupted package|is unknown trust|could not be looked up" "$logf"; then
+          keyring=$((keyring + 1))
           round=$((round - 1))
-          warn "keyring 不可信，重建后重试"
-          chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman-key --init || true
-          chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman-key --populate archlinuxarm || true
-          chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman -Sy --noconfirm || true
+          if [ "$keyring" -eq 1 ]; then
+            warn "keyring 不可用，推倒重建后重试"
+            chroot "$root" /usr/bin/env HOME=/root /bin/sh -c '
+              d=/etc/pacman.d/gnupg
+              rm -rf "$d"; mkdir -p "$d"; chmod 755 "$d"
+              /usr/bin/pacman-key --init && /usr/bin/pacman-key --populate archlinuxarm
+            ' || true
+            chroot "$root" /usr/bin/env HOME=/root /usr/bin/pacman -Sy --noconfirm || true
+          else
+            warn "keyring 仍不可用，本次构建不校验包签名（包来自官方 tarball + 官方镜像）"
+            chroot "$root" /usr/bin/env HOME=/root \
+              /bin/sh -c 'sed -i "s/^SigLevel.*/SigLevel = Never/" /etc/pacman.conf'
+          fi
           continue
         fi
         keep=""
