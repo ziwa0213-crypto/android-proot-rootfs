@@ -490,15 +490,17 @@ install_pkgs() { # $1=root $2=pm $3=tier
       ;;
     zypper)
       # Tumbleweed 是滚动版，zypper 会顺带升级依赖，这是它的正常行为。
+      # ⚠️ --no-recommends 是 install 的「命令选项」，必须写在 install 之后；
+      #    放到 install 之前会被当成全局选项，直接报 "The flag --no-recommends is not known"。
       # 容器镜像里的 keyring 有时比仓库签名旧，会报 "Signature verification failed
       # for repomd.xml"；这时自动降级重试一次（会打 warn，不静默）。
       if ! retry3 chroot "$root" /usr/bin/env HOME=/root \
              /usr/bin/zypper --non-interactive --gpg-auto-import-keys \
-               --no-recommends install $pkgs; then
+               install --no-recommends $pkgs; then
         warn "zypper 正常安装失败，降级到 --no-gpg-checks 重试（镜像来自 LXC 官方源，非第三方）"
         retry3 chroot "$root" /usr/bin/env HOME=/root \
           /usr/bin/zypper --non-interactive --no-gpg-checks \
-            --no-recommends install $pkgs \
+            install --no-recommends $pkgs \
           || die "zypper 装包失败（两种方式都失败）"
       fi
       ;;
