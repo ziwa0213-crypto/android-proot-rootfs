@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repo": "ziwa0213-crypto/android-proot-rootfs",
   "release": null,
-  "generatedAt": "2026-11-03T04:36:49Z",
+  "generatedAt": "2026-11-03T05:28:39Z",
   "packages": [
     {
       "name": "almalinux-9-arm64-base.tar.gz",
@@ -33,6 +33,16 @@
       "size": 33314879,
       "sha256": "ee78ac3f4fcf91060837dc0517a6495fc0ada2ccd465b932fd6a894e9b77ef19",
       "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/alpine-3.24/alpine-3.24-arm64-base.tar.gz"
+    },
+    {
+      "name": "archlinux-arm64-base.tar.gz",
+      "distro": "archlinux",
+      "version": "",
+      "arch": "arm64",
+      "tier": "base",
+      "size": 801176849,
+      "sha256": "ffd04f4897f7b175c2c90377434b7fb2bdb11fefb819e80f98283cc0a19a118d",
+      "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/archlinux/archlinux-arm64-base.tar.gz"
     },
     {
       "name": "debian-12-arm64-base.tar.gz",
