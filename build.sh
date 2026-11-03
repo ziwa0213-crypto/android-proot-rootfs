@@ -119,7 +119,7 @@ PKG_DNF_BASE="curl wget git less vim-minimal file jq tree htop unzip zip xz proc
 PKG_DNF_DEV="gcc gcc-c++ make python3 python3-pip python3-devel openssl-devel zlib-devel libffi-devel cmake sqlite"
 
 # zypper：openSUSE 的 openssl-devel 叫 libopenssl-devel，gpg 叫 gpg2，procps 不带 -ng
-PKG_ZYPPER_MIN="ca-certificates tzdata"
+PKG_ZYPPER_MIN="ca-certificates timezone"
 PKG_ZYPPER_BASE="curl wget git less vim file jq tree htop unzip zip xz gzip procps psmisc iproute2 net-tools openssh-clients gpg2 bash-completion"
 PKG_ZYPPER_DEV="gcc gcc-c++ make python3 python3-pip python3-devel libopenssl-devel zlib-devel libffi-devel cmake sqlite3"
 
@@ -468,7 +468,7 @@ install_pkgs() { # $1=root $2=pm $3=tier
           if grep -qxF "No match for argument: $p" "$logf"; then dropped="$dropped $p"
           else keep="$keep $p"; fi
         done
-        if [ "$keep" = "$want" ]; then
+        if [ "$(echo $keep)" = "$want" ]; then   # keep 拼接带前导空格，必须规范化后比
           # 不是包名不存在，多半是网络抖动，原样重试
           warn "失败原因不是包名不存在，重试一次"
           retry3 chroot "$root" /usr/bin/env HOME=/root LC_ALL=C \
@@ -490,18 +490,53 @@ install_pkgs() { # $1=root $2=pm $3=tier
       ;;
     zypper)
       # Tumbleweed 是滚动版，zypper 会顺带升级依赖，这是它的正常行为。
-      # ⚠️ --no-recommends 是 install 的「命令选项」，必须写在 install 之后；
-      #    放到 install 之前会被当成全局选项，直接报 "The flag --no-recommends is not known"。
-      # 容器镜像里的 keyring 有时比仓库签名旧，会报 "Signature verification failed
-      # for repomd.xml"；这时自动降级重试一次（会打 warn，不静默）。
-      if ! retry3 chroot "$root" /usr/bin/env HOME=/root \
-             /usr/bin/zypper --non-interactive --gpg-auto-import-keys \
-               install --no-recommends $pkgs; then
-        warn "zypper 正常安装失败，降级到 --no-gpg-checks 重试（镜像来自 LXC 官方源，非第三方）"
-        retry3 chroot "$root" /usr/bin/env HOME=/root \
-          /usr/bin/zypper --non-interactive --no-gpg-checks \
-            install --no-recommends $pkgs \
-          || die "zypper 装包失败（两种方式都失败）"
+      # 三个坑：
+      #  1) --no-recommends 是 install 的「命令选项」，必须写在 install 之后，
+      #     放前面会被当全局选项，报 "The flag --no-recommends is not known"。
+      #  2) --non-interactive 下只要有一个包名不存在，zypper 就整体中止（返回 104），
+      #     其余包一个都不装 —— 和 dnf 一样，失败后把报错点名的包剔掉重来。
+      #  3) 容器镜像里的 keyring 有时比仓库签名旧，会报 Signature verification failed，
+      #     这时降级到 --no-gpg-checks 重试一次。
+      local logf="$CACHE/.zypper-$DISTRO-$ARCH.log" want="$pkgs" keep="" p round=0 dropped=""
+      local gpg="--gpg-auto-import-keys"
+      mkdir -p "$CACHE"
+      while :; do
+        round=$((round + 1))
+        if chroot "$root" /usr/bin/env HOME=/root LC_ALL=C \
+             /usr/bin/zypper --non-interactive $gpg install --no-recommends $want \
+             2>&1 | tee "$logf"; then
+          break
+        fi
+        if [ "$gpg" = "--gpg-auto-import-keys" ] && grep -q 'Signature verification failed' "$logf"; then
+          warn "仓库签名校验失败，降级到 --no-gpg-checks 重试（镜像来自 LXC 官方源，非第三方）"
+          gpg="--no-gpg-checks"
+          round=$((round - 1))
+          continue
+        fi
+        keep=""
+        for p in $want; do
+          if grep -qE "'$p' not found in package names|No provider of '$p' found" "$logf"; then
+            dropped="$dropped $p"
+          else keep="$keep $p"; fi
+        done
+        if [ "$(echo $keep)" = "$want" ]; then   # keep 拼接带前导空格，必须规范化后比
+          # 不是包名不存在，多半是网络抖动，原样重试一次
+          warn "失败原因不是包名不存在，重试一次"
+          chroot "$root" /usr/bin/env HOME=/root LC_ALL=C \
+            /usr/bin/zypper --non-interactive $gpg install --no-recommends $want \
+            || { sed -n '/^Error/,+2p' "$logf" >&2 || true; die "zypper 装包失败"; }
+          break
+        fi
+        if [ "$round" -ge 3 ]; then
+          sed -n '/^Error/,+2p' "$logf" >&2 || true
+          die "zypper 装包失败（已剔除 3 轮仍失败）"
+        fi
+        warn "$DISTRO 的仓库里没有：$(echo $dropped | sed 's/^ //')，剔除后重试"
+        want="$keep"
+        if [ -z "$want" ]; then warn "清单里的包这个发行版都没有"; break; fi
+      done
+      if [ -n "$dropped" ]; then
+        warn "最终没有装的包（该发行版仓库未提供）：$(echo $dropped | sed 's/^ //')"
       fi
       ;;
     pacman)
