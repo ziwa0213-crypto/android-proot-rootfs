@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repo": "ziwa0213-crypto/android-proot-rootfs",
   "release": null,
-  "generatedAt": "2026-11-02T09:07:06Z",
+  "generatedAt": "2026-11-03T03:54:32Z",
   "packages": [
     {
       "name": "almalinux-9-arm64-base.tar.gz",
@@ -83,6 +83,16 @@
       "size": 70950629,
       "sha256": "3675cb41e79e53a42cb2dba8cab0c63f70b4f994806af213780329a4e0122940",
       "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/ubuntu-26.04/ubuntu-26.04-arm64-base.tar.gz"
+    },
+    {
+      "name": "void-arm64-base.tar.gz",
+      "distro": "void",
+      "version": "",
+      "arch": "arm64",
+      "tier": "base",
+      "size": 126458214,
+      "sha256": "6da751da2a77cad51435e7c4aa277077b020f29565c2ec531a7b3f4ba8f032b1",
+      "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/void/void-arm64-base.tar.gz"
     }
   ]
 }
