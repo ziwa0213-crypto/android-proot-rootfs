@@ -328,6 +328,21 @@ tarball_url() { # $1=arch  → 输出 url
   esac
 }
 
+# 少数 tarball 多包了一层顶层目录（Kali NetHunter 是 kali-arm64/），
+# 直接解到 $out 会让 /etc 整体下移一级 —— 后面写 resolv.conf、chroot 全都找不着。
+strip_topdir() { # $1=解压目录
+  local d="$1" n sub
+  n="$(find "$d" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
+  [ "$n" -eq 1 ] || return 0                 # 正常布局：顶层不止一个条目，不动
+  sub="$(find "$d" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)"
+  [ -n "$sub" ] || return 0                  # 唯一条目不是目录，也不动
+  [ -d "$sub/etc" ] || return 0              # 不像个根目录（没有 /etc），不动
+  log "rootfs 多了一层顶层目录 $(basename "$sub")，抬上来"
+  # 走 tar 管道而不是 mv：隐藏文件、权限、设备节点都不会漏
+  ( cd "$sub" && tar -cf - . ) | ( cd "$d" && tar -xf - )
+  rm -rf "$sub"
+}
+
 tarball_rootfs() { # $1=out
   local out="$1" url name
   url="$(tarball_url "$ARCH")"
@@ -339,6 +354,24 @@ tarball_rootfs() { # $1=out
   log "$DISTRO 官方 rootfs：$name"
   fetch_cached "$url" "$name"
   tar -xf "$CACHE/$name" -C "$out"
+  strip_topdir "$out"
+}
+
+# Kali NetHunter 的 rootfs 自带 /dev 设备节点（full / ptmx / console / random …），
+# 打进产物后普通用户解压会 mknod 失败；而运行时 /dev 本来就是 proot 提供的，
+# 留着这些节点没有意义。必须在 chroot_cleanup 之后调用 —— 那时 bind 已卸，
+# 删的才是 rootfs 里的副本，不会动到宿主机的 /dev。
+strip_dev_nodes() { # $1=root
+  local root="$1" n
+  [ -d "$root/dev" ] || return 0
+  if mountpoint -q "$root/dev" 2>/dev/null; then
+    warn "$root/dev 还挂着（宿主 /dev 的 bind），跳过设备节点清理"
+    return 0
+  fi
+  n="$(find "$root/dev" -mindepth 1 -maxdepth 1 ! -type d 2>/dev/null | wc -l)"
+  [ "$n" -gt 0 ] || return 0
+  find "$root/dev" -mindepth 1 -maxdepth 1 ! -type d -delete 2>/dev/null || true
+  log "清掉 rootfs 自带的 $n 个 /dev 条目（运行时由 proot 提供）"
 }
 
 # 3) docker save 格式（opencloudos）：外层是 OCI/docker 打包，里面 */layer.tar 才是 rootfs
@@ -1090,6 +1123,7 @@ build_one() { # $1=distro $2=arch $3=tier
 
   chroot_cleanup
   [ -n "${QDST:-}" ] && rm -f "$QDST"
+  strip_dev_nodes "$root"
 
   postprocess "$root" "$PM"
 
