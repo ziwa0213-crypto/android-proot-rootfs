@@ -393,12 +393,25 @@ chroot_cleanup() {
 
 # 删构建临时目录。里面的内核伪文件系统删不掉是正常的（proc/dev 里的东西不受 rm 管），
 # 但绝不能因此刷一屏 "不允许的操作 / 设备或资源忙" 吓人，所以先卸再删、报错全吞掉。
+# ⚠️ 更关键：$WORK/root/dev 曾经 mount --bind 到宿主的 /dev，两者是同一批 inode。
+#    只要还有挂载残留就 rm，等于在删宿主机的 /dev/null 之类的设备节点。
+#    所以删之前必须逐个确认没挂着，有一个没卸掉就整个放弃。
 rm_work() {
   chroot_cleanup
   [ -d "${WORK:-}" ] || return 0
+  local m left=""
+  for m in proc sys dev; do
+    [ -e "$WORK/root/$m" ] || continue
+    if mountpoint -q "$WORK/root/$m" 2>/dev/null; then left="$left $m"; fi
+  done
+  if [ -n "$left" ]; then
+    warn "$WORK/root 里的挂载点（$left）没卸干净，为安全起见不删这个目录"
+    warn "（继续删会连带删掉宿主机的 /dev/*）。手动清：sudo umount -R $WORK/root && sudo rm -rf $WORK"
+    return 1
+  fi
   rm -rf "$WORK" 2>/dev/null || true
   if [ -d "$WORK" ]; then
-    warn "$WORK 还有残留（多半是没卸干净的挂载点），手动清：sudo umount -R $WORK/root && sudo rm -rf $WORK"
+    warn "$WORK 还有残留，手动清：sudo rm -rf $WORK"
   fi
 }
 
@@ -934,7 +947,8 @@ build_one() { # $1=distro $2=arch $3=tier
   CACHE="$PWD/.work/cache"
   WORK="$PWD/.work/$DISTRO-$ARCH-$TIER"
   local root="$WORK/root"
-  rm_work; mkdir -p "$root"
+  rm_work || die "构建目录里还有没卸干净的挂载点，先按上面的提示手动清理再重跑"
+  mkdir -p "$root"
 
   log "构建 ${D_NAME[$DISTRO]} $VER（$ARCH / $TIER）"
 
