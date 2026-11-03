@@ -375,9 +375,31 @@ dockersave_rootfs() { # $1=out
 # ---------------------------------------------------------------- chroot 辅助
 MOUNTED=()
 chroot_cleanup() {
-  local i
-  for ((i=${#MOUNTED[@]}-1;i>=0;i--)); do umount "${MOUNTED[i]}" 2>/dev/null || true; done
+  local i m
+  for ((i=${#MOUNTED[@]}-1;i>=0;i--)); do
+    m="${MOUNTED[i]}"
+    # --bind /dev 会带进来 pts/mqueue/shm/hugepages 这些嵌套挂载，
+    # 单个 umount 会 EBUSY，必须先递归（-R）；再不行就惰性卸（-l）
+    umount -R "$m" 2>/dev/null || umount -l "$m" 2>/dev/null || true
+  done
   MOUNTED=()
+  # 兜底：mount 可能"成功但没进数组"，或者 chroot 内部又挂了东西
+  if [ -n "${WORK:-}" ] && [ -d "$WORK/root" ]; then
+    for m in proc sys dev; do
+      umount -R "$WORK/root/$m" 2>/dev/null || umount -l "$WORK/root/$m" 2>/dev/null || true
+    done
+  fi
+}
+
+# 删构建临时目录。里面的内核伪文件系统删不掉是正常的（proc/dev 里的东西不受 rm 管），
+# 但绝不能因此刷一屏 "不允许的操作 / 设备或资源忙" 吓人，所以先卸再删、报错全吞掉。
+rm_work() {
+  chroot_cleanup
+  [ -d "${WORK:-}" ] || return 0
+  rm -rf "$WORK" 2>/dev/null || true
+  if [ -d "$WORK" ]; then
+    warn "$WORK 还有残留（多半是没卸干净的挂载点），手动清：sudo umount -R $WORK/root && sudo rm -rf $WORK"
+  fi
 }
 
 # 交叉构建时把 qemu 放进 rootfs（必须在 mount 之前做）
@@ -912,7 +934,7 @@ build_one() { # $1=distro $2=arch $3=tier
   CACHE="$PWD/.work/cache"
   WORK="$PWD/.work/$DISTRO-$ARCH-$TIER"
   local root="$WORK/root"
-  rm -rf "$WORK"; mkdir -p "$root"
+  rm_work; mkdir -p "$root"
 
   log "构建 ${D_NAME[$DISTRO]} $VER（$ARCH / $TIER）"
 
@@ -968,7 +990,7 @@ build_one() { # $1=distro $2=arch $3=tier
   fi
 
   # proot 下残留的自指软链会让 rm -rf 返回非 0，别让它在成功之后把整个构建判成失败
-  [ "${KEEP:-0}" -eq 1 ] || rm -rf "$WORK" 2>/dev/null || true
+  [ "${KEEP:-0}" -eq 1 ] || rm_work
   echo; ok "产物 out/$name（$(du -h "$out" | cut -f1)）"
 }
 
