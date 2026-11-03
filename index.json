@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repo": "ziwa0213-crypto/android-proot-rootfs",
   "release": null,
-  "generatedAt": "2026-11-03T05:28:39Z",
+  "generatedAt": "2026-11-03T05:49:48Z",
   "packages": [
     {
       "name": "almalinux-9-arm64-base.tar.gz",
@@ -63,6 +63,16 @@
       "size": 79199242,
       "sha256": "24c2cf6c6a6566f9e8292f4a8f06c4d3b07030b63afd1c98328fb10ce59e8f81",
       "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/debian-13/debian-13-arm64-base.tar.gz"
+    },
+    {
+      "name": "kalinethunter-arm64-base.tar.gz",
+      "distro": "kalinethunter",
+      "version": "",
+      "arch": "arm64",
+      "tier": "base",
+      "size": 255032874,
+      "sha256": "86a3afb8258832c3f866b90371ebe83379211f23c82def048a5b398208be058c",
+      "url": "https://github.com/ziwa0213-crypto/android-proot-rootfs/releases/download/kalinethunter/kalinethunter-arm64-base.tar.gz"
     },
     {
       "name": "opencloudos-9-arm64-base.tar.gz",
